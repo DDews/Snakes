@@ -962,7 +962,7 @@ void uds_test()
 
 	u32 recv_buffer_size = UDS_DEFAULT_RECVBUFSIZE;
 	u32 wlancommID = 0x783a9dab;//Unique ID, change this to your own.
-	char *passphrase = "dandewsudstron saadbaigistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
+	char *passphrase = "dandewsudssnake saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
 
 	conntype = UDSCONTYPE_Client;
 
