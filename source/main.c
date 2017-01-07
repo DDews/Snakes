@@ -1719,6 +1719,12 @@ void uds_test()
 					else if (pos.dy > 0 && abs(pos.dy) > abs(pos.dx)) { if (oldDiag) msgtype = MOVE_UP; kDown = KEY_CPAD_UP; }
 					sprites[myNum].diag = 0;
 				}
+			} else if (oldDiag) {
+				sprites[myNum].diag = 0;
+				if (sprites[myNum].dx > 0) msgtype = MOVE_RIGHT;
+				else if (sprites[myNum].dx < 0) msgtype = MOVE_LEFT;
+				else if (sprites[myNum].dy > 0) msgtype = MOVE_UP;
+				else if (sprites[myNum].dy < 0) msgtype = MOVE_DOWN;
 			}
 
 			oldCPos = pos;
