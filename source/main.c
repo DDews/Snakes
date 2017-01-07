@@ -213,8 +213,8 @@ u32 colors[10] = { 0x000cff00, 0x00e4ff00, 0x00004eff, 0x00fc00ff, 0x0000fff0, 0
 #define MAGENTA ESC(35;1m)
 #define CYAN    ESC(36;1m)
 #define WHITE   ESC(37;1m)
-char textColors[8][12] = {GREEN, YELLOW, BLUE, MAGENTA, CYAN, GREEN, YELLOW, RED};
-char colorNames[8][12] = {"Green", "Yellow", "Blue", "Magenta", "Cyan", "Dark Green", "Orange", "Pink"};
+char textColors[10][12] = {GREEN, YELLOW, BLUE, MAGENTA, CYAN, GREEN, YELLOW, RED, WHITE, WHITE};
+char colorNames[10][12] = {"Green", "Yellow", "Blue", "Magenta", "Cyan", "Dark Green", "Orange", "Pink", "White", "Black"};
 
 
 
@@ -411,10 +411,10 @@ static void setSprites() {
 	srand(time(NULL));
 	usedSpecial = false;
 	memset(path, 0, sizeof(path[0][0]) * 240 * 400 * 10);
+	apple.x = (rand() % (400 - 32)) << 8;
+	apple.y = (rand() % (240 - 32)) << 8;
 	for(int i = 0; i < NUM_SPRITES; i++) {
 		//random place and speed
-		apple.x = (rand() % (400 - 32)) << 8;
-		apple.y = (rand() % (240 - 32)) << 8;
 		sprites[i].x = (rand() % (400 - 32 )) << 8;
 		sprites[i].y = (rand() % (240 - 32 )) << 8 ;
 		while (hasCommonY(i)) {
@@ -447,7 +447,7 @@ static void changeApple() {
 	int oldy = apple.y;
 	apple.x = (rand() % (400 - 32)) << 8;
 	apple.y = (rand() % (240 - 32)) << 8;
-	while (getColor(apple.x >> 8, apple.y >> 8) || hasCommonY(num_bikes - 1)) {
+	while (getColor(apple.x >> 8, apple.y >> 8)) {
 		apple.x = (rand() % (400 - 32)) << 8;
 		apple.y = (rand() % (240 - 32)) << 8;
 	}
@@ -465,7 +465,7 @@ static void moveApple() {
 	int oldy = apple.y;
 	apple.x = (rand() % (400 - 32)) << 8;
 	apple.y = (rand() % (240 - 32)) << 8;
-	while (getColor(apple.x >> 8, apple.y >> 8) || hasCommonY(num_bikes - 1)) {
+	while (getColor(apple.x >> 8, apple.y >> 8)) {
 		apple.x = (rand() % (400 - 32)) << 8;
 		apple.y = (rand() % (240 - 32)) << 8;
 	}
@@ -703,7 +703,9 @@ static void eraseOvershoot(Sprite sprite) {
 	int udy = sprite.y >> 8;
 	if (cx == udx && cy == udy) return;
 	int pathn = currentPath[img];
-	while ((path[pathn][img].x >> 8) != udx && (path[pathn][img].y >> 8) != udy && pathn != pathPos[img]) {
+	int i = 0;
+	while ((path[pathn][img].x >> 8) != udx && (path[pathn][img].y >> 8) != udy && pathn != pathPos[img] && i < 40) {
+		i++;
 		drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9);
 		pathn--;
 		if (pathn < 0) pathn = 240 * 400;
@@ -919,6 +921,7 @@ static void moveSprites() {
 				sprites[i].length += growthRate;
 				memset(replyScore,0,sizeof(replyScore[0]) * 10);
 				moveApple();
+				if (debugging) printf("Got apple.\n");
 			}
 			else if (getLength(i) < 5) {} //don't die if game just started
 			else if ((color1 != colors[8] && color2 != colors[8]) && (color1 > 0 || color2 > 0)) {
@@ -1919,7 +1922,7 @@ void uds_test()
 						else if (msg.sprite.speed == 1011 && myNum != 0) {} // ignore
 						else if (msg.sprite.speed == 66) { 
 							if (msg.sprite.image == myNum) { if (msg.timestamp == lastChange) replyChange[msg.sender] = true; }
-							else if (msg.sender == msg.sprite.image) { if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) updateApple(msg.sprite.x,msg.sprite.y); UDSSend(msg); }
+							else if (msg.sender == msg.sprite.image) { if (debugging) printf("changing apple...\n"); if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) updateApple(msg.sprite.x,msg.sprite.y); UDSSend(msg); }
 						}
 						else if (msg.sprite.speed == 77) { 
 							if (msg.sprite.image == myNum) { if (msg.timestamp == lastScore) replyScore[msg.sender] = true; }
