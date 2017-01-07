@@ -2290,11 +2290,19 @@ int main(int argc, char **argv) {
 	ret = udsInit(0x3000, NULL);//The sharedmem size only needs to be slightly larger than the total recv_buffer_size for all binds, with page-alignment.
 	if(R_FAILED(ret))
 	{
-		if (ret == 0x9411002) {
-			printf("Wi-Fi must be turned on to play this game!\nBe sure you switch your wifi on.\nFor old 3ds, its the switch on the right.");
+		if (ret == 0xc9411002) {
+			printf("Wi-Fi must be turned on!\nBe sure you switch your wifi on\nFor old 3ds, its the switch on the right\n\nPress A or START to exit.");
 		}
 		else {
-			printf("udsInit failed: 0x%08x.\n", (unsigned int)ret);
+			printf("udsInit failed: 0x%08x.\n\nPress A or START to exit.", (unsigned int)ret);
+		}
+		while (1) {
+			gspWaitForVBlank();
+			gfxFlushBuffers();
+			gfxSwapBuffers();
+			hidScanInput();
+			if (hidKeysDown() & KEY_START) break;
+			if (hidKeysDown() & KEY_A) break;
 		}
 	}
 	else
