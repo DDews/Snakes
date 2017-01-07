@@ -659,7 +659,7 @@ static void printScore() {
 	printf("\x1b[4;0HPress %sY%s to teleport the apple once.",GREEN,WHITE);
 	int x = 5;
 	for (int i = actual_bikes; i < num_bikes; i++) {
-		printf("\x1b[%d;0H%s%s%s has joined the game. (%d.%d)",x + i - actual_bikes,textColors[i],sprites[i].username,WHITE, actual_bikes, num_bikes);
+		printf("\x1b[%d;0H%s%s%s has joined the game.",x + i - actual_bikes,textColors[i],sprites[i].username,WHITE);
 	}
 	if (debugging) printf("\x1b[5;0Hactual_bikes: %d mynum: %d %d",actual_bikes, myNum, num_bikes);
 	//printf("\x1b[5;0Hdead: 0x%08x, 0x%08x",dead,dead2);
@@ -962,16 +962,8 @@ static void sceneExit(void) {
 }
 static SwkbdCallbackResult wrongName(void* user, const char** ppMessage, const char* text, size_t textlen)
 {
-  	int i = 0;
-  	char lowertext[50];
-  	strncpy(lowertext,text,sizeof(lowertext));
-	while( lowertext[i] ) 
-	{
-	  putchar(tolower(lowertext[i]));
-	  i++;
-	}
 
-	if (strstr(lowertext, "host"))
+	if (strstr(text, "host"))
 	{
 		*ppMessage = "Just no.";
 		return SWKBD_CALLBACK_CONTINUE;
