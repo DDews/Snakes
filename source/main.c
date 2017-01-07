@@ -231,7 +231,7 @@ u32 getColor(int x, int y) {
 void drawSprite( int x, int y, int width, int height, int image ) {
 //---------------------------------------------------------------------------------
 	u32 color = getColor(x,y);
-	if (image != 9 && color != colors[8] && color) return;
+	if (image != 10) if (image != 9 && color != colors[8] && color) return;
 	float left = images[image].left;
 	float right = images[image].right;
 	float top = images[image].top;
@@ -619,7 +619,7 @@ static void sceneInit(void) {
 	GSPGPU_FlushDataCache(gpusrc, width*height*4);
 
 	// Load the texture and bind it to the first texture unit
-	C3D_TexInit(&splash_tex, width, height, GPU_RGBA8);
+	if (!C3D_TexInit(&splash_tex, width, height, GPU_RGBA8)) printf("Error: failed to initialize splash image.\n");
 
 	// Convert image to 3DS tiled texture format
 	GX_DisplayTransfer ((u32*)gpusrc, GX_BUFFER_DIM(width,height), (u32*)splash_tex.data, GX_BUFFER_DIM(width,height), TEXTURE_TRANSFER_FLAGS);
@@ -1029,7 +1029,7 @@ void uds_test()
 	C3D_RenderTargetSetOutput(target, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
 	C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 		C3D_FrameDrawOn(target);
-		drawSprite((400 - 256) / 2,0,256,256,10);
+		drawSprite(72,0,256,256,10);
 	C3D_FrameEnd(0);
 	gfxFlushBuffers();
 	gfxSwapBuffers();
@@ -1041,13 +1041,11 @@ void uds_test()
 
 		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target);
-			drawSprite((400 - 256) / 2,0,256,256,10);
+			drawSprite(72,0,256,256,10);
 		C3D_FrameEnd(0);
 		gfxFlushBuffers();
 		gfxSwapBuffers();
 
-		gfxFlushBuffers();
-		gfxSwapBuffers();
 		// Respond to user input
 		u32 kDown = hidKeysDown();
 		u32 kHeld = hidKeysHeld();
@@ -1159,7 +1157,6 @@ void uds_test()
 		}
 
 	}
-	C3D_TexBind(0, &spritesheet_tex);
 	if(total_networks && !hosting)
 	{
 		free(tmpbuf);
@@ -1359,6 +1356,7 @@ void uds_test()
 	//printf("Press A to stop data transfer.\n");
 	char quitName[50];
 	memset(quitName,'\0',sizeof(quitName));
+	C3D_TexBind(0, &spritesheet_tex);
 	while (replay) {
 		errorQuit = 0;
 		if (num_bikes < 1) num_bikes = 1;
@@ -2446,7 +2444,7 @@ int main(int argc, char **argv) {
 				{
 					memcpy(&msg,tmpbuf,sizeof(Message));
 					if (debugging) printf("image: %d sender: %d node: %d speed: %d\ntimestamp: 0x%08x mine: 0x%08x", msg.sprite.image, msg.sender, msg.sprite.node, msg.sprite.speed, (unsigned long) msg.timestamp, (unsigned long) lastSprite);
-					if (msg.sprite.speed == 999 && msg.sprite.image == myNode && msg.timestamp == lastSprite) { printf("%d leaving: %d\n",myNode,msg.sprite.node); replySprite[msg.sprite.node] = true; }
+					if (msg.sprite.speed == 999 && msg.sprite.image == myNode && msg.timestamp == lastSprite) { if (debugging) printf("%d leaving: %d\n",myNode,msg.sprite.node); replySprite[msg.sprite.node] = true; }
 					int responded = 0;
 					for (int i = 0; i <= NUM_SPRITES; i++) {
 						if (i != myNode && replySprite[i]) responded++;
