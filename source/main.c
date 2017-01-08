@@ -25,6 +25,7 @@
 #include "bike_png.h"
 #include "qrcode_png.h"
 
+#define VERSION "0.1.3"
 
 #define TICKS_PER_MS 268123
 #define TICKS_PER_SEC 268123480
@@ -69,8 +70,14 @@ bool uds_enabled = false;
 bool readyToStart = false;
 bool debugging = false;
 
+
+
+bool cheats = false;
+float oldpx = 0;
+float oldpy = 0;
 int diag = 0;
 circlePosition oldCPos;
+touchPosition touch;
 int wakeup = false;
 int myNode = 0;
 bool CATASTROPHIC_FAILURE = false;
@@ -87,7 +94,7 @@ u32 dead2;
 bool addedToGame = true;
 u64 lastSent = 0;
 u64 UDSSent = 0;
-
+circlePosition cpos;
 
 bool replay = true;
 bool connectionEstablished = false;
@@ -150,6 +157,8 @@ typedef struct {
 	u64 timestamp;
 	int sender;
 }Message;
+
+u64 lastApple = 0;
 
 int actual_bikes = 1;
 Message sentMsg;
@@ -289,9 +298,17 @@ static void UDSResend(bool replied[], Message msg) {
 	else msg.timestamp = lastSprite;
 	if(conntype!=UDSCONTYPE_Spectator)
 	{
+		if (debugging) {
+			printf("replies: ");
+			for (int i = 0; i < num_bikes; i++) {
+				if (i == myNum) printf("-");
+				else printf("%d",replied[i]);
+			}
+			printf("\n");
+		}
 		for (int i = 0; i < num_bikes; i++) {
-			if (debugging) printf("resending to... %d: %d\n",i,sprites[i].node);
 			if (!replied[i] && i != myNum && sprites[i].node) {
+				if (debugging) printf("resending to... %d: %d\n",i,sprites[i].node);
 				ret = udsSendTo(sprites[i].node, 1, UDS_SENDFLAG_Default, &msg, sizeof(msg));
 				if (UDS_CHECK_SENDTO_FATALERROR(ret))
 				{
@@ -312,10 +329,11 @@ static int UDSDirect(int node, Message msg) {
 	ret=0;
 	if(conntype!=UDSCONTYPE_Spectator)//Spectators aren't allowed to send data.
 	{
+		if (debugging) printf("direct to %d: img: %d speed: %d\n",node,msg.sprite.image,msg.sprite.speed);
 		ret = udsSendTo(node, 1, UDS_SENDFLAG_Default, &msg, sizeof(msg));
 		if(UDS_CHECK_SENDTO_FATALERROR(ret))
 		{
-			printf("Error: UDSSend() returned 0x%08x.\n", (unsigned int)ret);
+			printf("Error: UDSDirect() returned 0x%08x.\n", (unsigned int)ret);
 			CATASTROPHIC_FAILURE = true;
 			return 1;
 		}
@@ -325,10 +343,10 @@ static int UDSDirect(int node, Message msg) {
 static int UDSSend(Message msg) {
 	if (!uds_enabled) return;
 	msg.sender = myNum;
-	if (debugging) printf("sending speed: %d image: %d diag: %d",msg.sprite.speed,msg.sprite.image,msg.sprite.diag);
-	if (msg.sprite.image == myNum && msg.sprite.speed == 77) { memset(replySprite,0,sizeof(replyScore[0]) * 10); lastScore = svcGetSystemTick(); msg.timestamp = lastScore; }
-	else if (msg.sprite.image == myNum && msg.sprite.speed == 66) { memset(replySprite,0,sizeof(replyScore[0]) * 10); lastChange = svcGetSystemTick(); msg.timestamp = lastChange; }
-	else if (msg.sprite.image == myNum) { memset(replySprite,0,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); msg.timestamp = lastSprite; }
+	if (debugging) printf("sending speed: %d image: %d diag: %d\n",msg.sprite.speed,msg.sprite.image,msg.sprite.diag);
+	if (msg.sprite.image == myNum && msg.sprite.speed == 77) { msg.timestamp = lastScore; }
+	else if (msg.sprite.image == myNum && msg.sprite.speed == 66) { msg.timestamp = lastChange; }
+	else if (msg.sprite.image == myNum) { msg.timestamp = lastSprite; }
 	else if (msg.sprite.speed == 999 && msg.sprite.image == myNode && msg.sprite.node == myNode) { msg.timestamp = lastSprite; msg.sender = myNode; }
 	sentMsg = msg;
 	ret=0;
@@ -499,9 +517,9 @@ static void setApple(int player, int x, int y) {
 	apple.y = y;
 	drawSprite(oldx >> 8, oldy >> 8, 2 , 2, 9);
 	drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
-	score[player]++;
+	//score[player]++;
 	growth[player] += growthRate;
-	sprites[player].length += growthRate;
+	//sprites[player].length += growthRate;
 	usedSpecial = false;
 }
 void print_constatus()
@@ -665,7 +683,7 @@ static void printScore() {
 	for (int i = actual_bikes; i < num_bikes; i++) {
 		printf("\x1b[%d;0H%s%s%s has joined the game.",x + i - actual_bikes,textColors[i],sprites[i].username,WHITE);
 	}
-	if (debugging) printf("\x1b[5;0Hactual_bikes: %d mynum: %d %d",actual_bikes, myNum, num_bikes);
+	if (debugging) printf("\x1b[5;0Hactual_bikes: %d mynum: %d %d\n",actual_bikes, myNum, num_bikes);
 	//printf("\x1b[5;0Hdead: 0x%08x, 0x%08x",dead,dead2);
 	//printf("\x1b[6;0Hnum_bikes: %d, myNum: %d",num_bikes,myNum);
 	//printf("\x1b[7;0Hgrowth: %d length: %d (%d)",growth[myNum],sprites[myNum].length,getLength(myNum));
@@ -916,10 +934,11 @@ static void moveSprites() {
 		if (currentPath[i] > 400 * 240) currentPath[i] = 0;
 		path[currentPath[i]][i].x = sprites[i].x;
 		path[currentPath[i]][i].y = sprites[i].y;
-		if (i == myNum) {
+		if (i == myNum && !sprites[myNum].dead) {
 			u32 color1 = getColor(sprites[i].x >> 8, sprites[i].y >> 8);
 			u32 color2 = getColor((sprites[i].x >> 8) + 1, (sprites[i].y >> 8) + 1);
-			if (abs((sprites[i].x >> 8) - (apple.x >> 8)) <= 2 && abs((sprites[i].y >> 8) - (apple.y >> 8)) <= 2) {
+			if (svcGetSystemTick() - lastApple > TICKS_PER_MS * 15 * 6 * lagMult()) if (abs((sprites[i].x >> 8) - (apple.x >> 8)) <= 2 && abs((sprites[i].y >> 8) - (apple.y >> 8)) <= 2) {
+				lastApple = svcGetSystemTick();
 				score[i]++;
 				growth[i] += growthRate;
 				sprites[i].length += growthRate;
@@ -1022,7 +1041,7 @@ void uds_test()
 	int hosting = 0;
 	int readyToJoin = 0;
 
-	printf("Hold A to host\nPress B to scan for a host.\nPress Y to change name.\nPress X for QRCode to latest release.\nPress START to exit.\n");
+	printf("Version %s\n\nHold A to host\nPress B to scan for a host.\nPress Y to change name.\nPress X for QRCode to latest release.\nPress START to exit.\n",VERSION);
 	while (1) {
 		hidScanInput();
 		gspWaitForVBlank();
@@ -1046,7 +1065,8 @@ void uds_test()
 		if (kDown & KEY_START) return;
 		if (kDown & KEY_L) { debugging = true; printf("Debugging turned on.\n"); }
 		if (kDown & KEY_A) { hosting = 1; break; }
-		if (kDown & KEY_X) qrcode = true;
+		if (kHeld & KEY_R && kDown & KEY_X) { cheats = true; printf("Move the apple with touchscreen!"); }
+		else if (kDown & KEY_X) qrcode = true;
 		else if (kDown & KEY_Y) {
 			static SwkbdState swkbd;
 			static char mybuf[20];
@@ -1320,8 +1340,8 @@ void uds_test()
 						sprites[myNum].node = myNode;
 						msg.sprite = sprites[myNum]; 
 						msg.sprite.speed = 1111; 
-						UDSSend(msg);
 						lastSprite = svcGetSystemTick();
+						UDSSend(msg);
 					}
 					memset(tmpbuf, 0, tmpbuf_size);
 					actual_size = 0;
@@ -1685,12 +1705,13 @@ void uds_test()
 					msg.sprite = sprites[myNum];
 					msg.sprite.image = myNum;
 					msg.sprite.speed = 77;
+					msg.sprite.dx = score[myNum];
 					msg.sprite.x = apple.x;
 					msg.sprite.y = apple.y;
 					lastScore = svcGetSystemTick();
 					UDSResend(replyScore,msg);
 				}
-				if (!allReplied(replyChange) && svcGetSystemTick() - lastChange > TICKS_PER_MS * 15 * 6 * lagMult()) {
+				else if (!allReplied(replyChange) && svcGetSystemTick() - lastChange > TICKS_PER_MS * 15 * 6 * lagMult()) {
 					msg.sprite = sprites[myNum];
 					msg.sprite.image = myNum;
 					msg.sprite.speed = 66;
@@ -1728,48 +1749,74 @@ void uds_test()
 			u32 kDown = hidKeysDown();
 			u32 kHeld = hidKeysHeld();
 			u32 kUp = hidKeysUp();
-			circlePosition pos;
-			hidCircleRead(&pos);
+			hidCircleRead(&cpos);
 
+			//Read the touch screen coordinates
+			hidTouchRead(&touch);
+
+			float px = (float)touch.px / 312.0f;
+			float py = (float)touch.py / 235.0f;
+			px *= 400.0f;
+			py *= 240.0f;
+
+			if (cheats && px && py) {
+				printf("%03d %03d\n",(int)px,(int)py);
+				drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 9);
+				apple.x = (int)px;
+				apple.y = (int)py;
+				apple.x = apple.x << 8;
+				apple.y = apple.y << 8;
+				drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
+				oldpx = px;
+				oldpy = py;
+			} else if (oldpx && oldpy) {
+				oldpx = 0;
+				oldpy = 0;
+				msg.sprite.speed = 66;
+				msg.sprite.x = apple.x;
+				msg.sprite.y = apple.y;
+				memset(replyChange,0,sizeof(replyChange[0]) * 10);
+				UDSSend(msg);
+			}
 			//Read the CirclePad position
 			if (kDown & KEY_START) {
 				replay = false;
 				return; // break in order to return to hbmenu
 			}
 			u32 msgtype = NULL;
-			if ((abs(pos.dy) > 17 || abs(pos.dx) > 17) && !(oldCPos.dx == 0 && oldCPos.dy == 0)){
-				float dvd = abs(pos.dy) > abs(pos.dx) ? abs(pos.dy) : abs(pos.dx) / abs(abs(pos.dy) - abs(pos.dx));
+			if ((abs(cpos.dy) > 17 || abs(cpos.dx) > 17) && !(oldCPos.dx == 0 && oldCPos.dy == 0)){
+				float dvd = abs(cpos.dy) > abs(cpos.dx) ? abs(cpos.dy) : abs(cpos.dx) / abs(abs(cpos.dy) - abs(cpos.dx));
 				if (dvd < 120 && dvd > 1) {
-					if (pos.dy > 0 && pos.dx > 0) {
+					if (cpos.dy > 0 && cpos.dx > 0) {
 						sprites[myNum].diag = NORTHEAST;
 						if (oldMove == MOVE_UP) kDown = KEY_CPAD_RIGHT;
 						else if (oldMove == MOVE_RIGHT) kDown = KEY_CPAD_UP;
 						else if (sprites[myNum].dx != 0) kDown = KEY_CPAD_UP;
 						else kDown = KEY_CPAD_RIGHT;
-					} else if (pos.dx < 0 && pos.dy < 0) {
+					} else if (cpos.dx < 0 && cpos.dy < 0) {
 						sprites[myNum].diag = SOUTHWEST;
 						if (oldMove == MOVE_DOWN) kDown = KEY_CPAD_LEFT;
 						else if (oldMove == MOVE_LEFT) kDown = KEY_CPAD_DOWN;
 						else if (sprites[myNum].dx != 0) kDown = KEY_CPAD_DOWN;
 						else kDown = KEY_CPAD_LEFT;
-					} else if (pos.dx < 0 && pos.dy > 0) {
+					} else if (cpos.dx < 0 && cpos.dy > 0) {
 						sprites[myNum].diag = NORTHWEST;
 						if (oldMove == MOVE_UP) kDown = KEY_CPAD_LEFT;
 						else if (oldMove == MOVE_LEFT) kDown = KEY_CPAD_UP;
 						else if (sprites[myNum].dx != 0) kDown = KEY_CPAD_UP;
 						else kDown = KEY_CPAD_LEFT;
-					} else if (pos.dx > 0 && pos.dy < 0) {
+					} else if (cpos.dx > 0 && cpos.dy < 0) {
 						sprites[myNum].diag = SOUTHEAST;
 						if (oldMove == MOVE_DOWN) kDown = KEY_CPAD_RIGHT;
 						else if (oldMove == MOVE_RIGHT) kDown = KEY_CPAD_DOWN;
 						else if (sprites[myNum].dx != 0) kDown = KEY_CPAD_DOWN;
 						else kDown = KEY_CPAD_RIGHT;
 					} 
-				} else if (pos.dx != oldCPos.dx || pos.dy != oldCPos.dy) {
-					if (pos.dx < 0 && abs(pos.dx) > abs(pos.dy)) { if (oldDiag) msgtype = MOVE_LEFT; kDown = KEY_CPAD_LEFT; }
-					else if (pos.dx > 0 && abs(pos.dx) > abs(pos.dy)) { if (oldDiag) msgtype = MOVE_RIGHT; kDown = KEY_CPAD_RIGHT; }
-					else if (pos.dy < 0 && abs(pos.dy) > abs(pos.dx)) { if (oldDiag) msgtype = MOVE_DOWN; kDown = KEY_CPAD_DOWN; } 
-					else if (pos.dy > 0 && abs(pos.dy) > abs(pos.dx)) { if (oldDiag) msgtype = MOVE_UP; kDown = KEY_CPAD_UP; }
+				} else if (cpos.dx != oldCPos.dx || cpos.dy != oldCPos.dy) {
+					if (cpos.dx < 0 && abs(cpos.dx) > abs(cpos.dy)) { if (oldDiag) msgtype = MOVE_LEFT; kDown = KEY_CPAD_LEFT; }
+					else if (cpos.dx > 0 && abs(cpos.dx) > abs(cpos.dy)) { if (oldDiag) msgtype = MOVE_RIGHT; kDown = KEY_CPAD_RIGHT; }
+					else if (cpos.dy < 0 && abs(cpos.dy) > abs(cpos.dx)) { if (oldDiag) msgtype = MOVE_DOWN; kDown = KEY_CPAD_DOWN; } 
+					else if (cpos.dy > 0 && abs(cpos.dy) > abs(cpos.dx)) { if (oldDiag) msgtype = MOVE_UP; kDown = KEY_CPAD_UP; }
 					sprites[myNum].diag = 0;
 				}
 			} else if (oldDiag) {
@@ -1780,7 +1827,7 @@ void uds_test()
 				else if (sprites[myNum].dy < 0) msgtype = MOVE_DOWN;
 			}
 
-			oldCPos = pos;
+			oldCPos = cpos;
 			//if (debugging) printf("cpad: %03d %03d %d %f\n",pos.dx,pos.dy, oldMove, dvd);
 			if (kDown & KEY_Y && !usedSpecial) {
 				usedSpecial = true;
@@ -1893,7 +1940,7 @@ void uds_test()
 					{
 						//Message msg;
 						memcpy(&msg,tmpbuf,sizeof(Message));
-						if (debugging) printf("sender: %d speed: %d diag: %d node: %d\n",msg.sender,msg.sprite.speed,msg.sprite.diag, msg.sprite.node);
+						//if (debugging) printf("sender: %d image: %d speed: %d diag: %d\n",msg.sender,msg.sprite.image, msg.sprite.speed,msg.sprite.diag);
 						oldspeed = msg.sprite.speed;
 						oldsender = msg.sender;
 						if (msg.sprite.speed == 101 && msg.sender == 0) { UDSSend(msg); } //ignore.
@@ -1929,14 +1976,14 @@ void uds_test()
 						}
 						else if (msg.sprite.speed == 1011 && myNum != 0) {} // ignore
 						else if (msg.sprite.speed == 66) { 
-							if (msg.sprite.image == myNum) { if (msg.timestamp == lastChange) replyChange[msg.sender] = true; }
-							else if (msg.sender == msg.sprite.image) { if (debugging) printf("changing apple...\n"); if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) updateApple(msg.sprite.x,msg.sprite.y); UDSSend(msg); }
+							if (msg.sprite.image == myNum) { if (msg.timestamp == lastChange) replyChange[msg.sender] = true; else printf("replyChange from %d: 0x%08x != 0x%08x\n",msg.sender,msg.timestamp,lastChange); }
+							else if (msg.sender == msg.sprite.image) { UDSDirect(msg.sprite.node,msg); if (debugging) printf("changing apple...\n"); if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) updateApple(msg.sprite.x,msg.sprite.y); }
 						}
 						else if (msg.sprite.speed == 77) { 
-							if (msg.sprite.image == myNum) { if (msg.timestamp == lastScore) replyScore[msg.sender] = true; }
-							else if (msg.sender == msg.sprite.image) { if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) setApple(msg.sprite.image, msg.sprite.x, msg.sprite.y); UDSSend(msg); }
+							if (msg.sprite.image == myNum) { if (msg.timestamp == lastScore) replyScore[msg.sender] = true;  else printf("replyScore from %d: 0x%08x != 0x%08x\n",msg.sender,msg.timestamp,lastScore); }
+							else if (msg.sender == msg.sprite.image) { UDSDirect(msg.sprite.node,msg); if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) { sprites[msg.sprite.image].length = msg.sprite.length; setApple(msg.sprite.image, msg.sprite.x, msg.sprite.y); } score[msg.sprite.image] = msg.sprite.dx; }
 						}
-						else if (msg.sprite.image == myNum) { if (msg.sprite.speed == 1001) break; if (msg.timestamp == lastSprite) replySprite[msg.sender] = true; }
+						else if (msg.sprite.image == myNum) { if (msg.sprite.speed == 1001) break; if (msg.timestamp == lastSprite) replySprite[msg.sender] = true;  else printf("replySprite from %d: 0x%08x != 0x%08x\n",msg.sender,msg.timestamp,lastSprite); }
 						else if (msg.sprite.speed == 1001) {} //ignore.
 						else {
 							
@@ -1970,7 +2017,7 @@ void uds_test()
 									UDSSend(msg); 
 								} 
 							}
-							if (msg.sender == msg.sprite.image) UDSSend(msg);
+							if (msg.sender == msg.sprite.image) UDSDirect(msg.sprite.node,msg);
 							int img = msg.sprite.image;
 							if (msg.sprite.image < actual_bikes && msg.sender == msg.sprite.image) {
 								
@@ -2003,7 +2050,7 @@ void uds_test()
 				gfxSwapBuffers();
 			}
 			if (everyoneElseIsDead()) {
-				if (getHighestScore() == myNum && allReplied(replyScore)) { sprites[myNum].dead = true; msg.sprite = sprites[myNum]; UDSSend(msg); }
+				if (getHighestScore() == myNum && allReplied(replyScore)) { sprites[myNum].dead = true; sprites[myNum].node = myNode; msg.sprite = sprites[myNum]; UDSSend(msg); }
 			}
 			if (everyoneElseIsDead() && sprites[myNum].dead) break;
 		}
@@ -2032,6 +2079,7 @@ void uds_test()
 				sprites[myNum].dead = true;
 				sprites[myNum].node = myNode;
 				msg.sprite = sprites[myNum];
+				lastSprite = svcGetSystemTick();
 				UDSResend(replySprite,msg);
 			} //Be sure to still resend my death msg if someone hasn't gotten it
 			if (allReplied(replyScore) && myNum == 0 && num_bikes > 1) { if (debugging) printf("Everyone got the message. Sending bike information.."); break; }
@@ -2121,6 +2169,7 @@ void uds_test()
 					if (joinedNum != msg.sprite.image) printf("\x1b[%d;0H%s%s has joined as %s%s\n",numLeft + 5,textColors[msg.sprite.image],msg.sprite.username,colorNames[msg.sprite.image],WHITE);
 					joinedNum = msg.sprite.image;
 					if (myNum == 0) {
+						sprites[myNum].node = myNode;
 						msg.sprite = sprites[msg.sprite.image];
 						msg.sprite.dead = true;
 						msg.sprite.speed = 1001;
@@ -2130,6 +2179,7 @@ void uds_test()
 					sprites[myNum].node = myNode;
 					memset(sprites[myNum].username,'\0',sizeof(sprites[myNum].username));
 					strncpy(sprites[myNum].username,myName,sizeof(sprites[myNum].username));
+					sprites[myNum].node = myNode;
 					msg.sprite = sprites[myNum];
 					UDSSend(msg);
 				}
