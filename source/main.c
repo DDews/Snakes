@@ -1976,14 +1976,14 @@ void uds_test()
 						}
 						else if (msg.sprite.speed == 1011 && myNum != 0) {} // ignore
 						else if (msg.sprite.speed == 66) { 
-							if (msg.sprite.image == myNum) { if (msg.timestamp == lastChange) replyChange[msg.sender] = true; else printf("replyChange from %d: 0x%08x != 0x%08x\n",msg.sender,msg.timestamp,lastChange); }
+							if (msg.sprite.image == myNum) { if (msg.timestamp == lastChange) replyChange[msg.sender] = true; else if (debugging) printf("replyChange from %d: 0x%08x != 0x%08x\n",msg.sender,msg.timestamp,lastChange); }
 							else if (msg.sender == msg.sprite.image) { UDSDirect(msg.sprite.node,msg); if (debugging) printf("changing apple...\n"); if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) updateApple(msg.sprite.x,msg.sprite.y); }
 						}
 						else if (msg.sprite.speed == 77) { 
-							if (msg.sprite.image == myNum) { if (msg.timestamp == lastScore) replyScore[msg.sender] = true;  else printf("replyScore from %d: 0x%08x != 0x%08x\n",msg.sender,msg.timestamp,lastScore); }
+							if (msg.sprite.image == myNum) { if (msg.timestamp == lastScore) replyScore[msg.sender] = true;  else if (debugging) printf("replyScore from %d: 0x%08x != 0x%08x\n",msg.sender,msg.timestamp,lastScore); }
 							else if (msg.sender == msg.sprite.image) { UDSDirect(msg.sprite.node,msg); if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) { sprites[msg.sprite.image].length = msg.sprite.length; setApple(msg.sprite.image, msg.sprite.x, msg.sprite.y); } score[msg.sprite.image] = msg.sprite.dx; }
 						}
-						else if (msg.sprite.image == myNum) { if (msg.sprite.speed == 1001) break; if (msg.timestamp == lastSprite) replySprite[msg.sender] = true;  else printf("replySprite from %d: 0x%08x != 0x%08x\n",msg.sender,msg.timestamp,lastSprite); }
+						else if (msg.sprite.image == myNum) { if (msg.sprite.speed == 1001) break; if (msg.timestamp == lastSprite) replySprite[msg.sender] = true;  else if (debugging) printf("replySprite from %d: 0x%08x != 0x%08x\n",msg.sender,msg.timestamp,lastSprite); }
 						else if (msg.sprite.speed == 1001) {} //ignore.
 						else {
 							
