@@ -11,6 +11,7 @@
 
 ; Outputs
 .out outpos position
+.out outclr color
 .out outtc0 texcoord0
 
 ; Inputs (defined as aliases for convenience)
@@ -30,7 +31,12 @@
 	dp4 outpos.z, projection[2], r0
 	dp4 outpos.w, projection[3], r0
 
- 	mov outtc0, intex
+	; outclr = white
+	mov outclr, ones
 
+	; outtc0 = intex
+	mov outtc0, intex
+
+	; We're finished
 	end
 .end
