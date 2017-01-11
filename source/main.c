@@ -438,7 +438,7 @@ myprintf(const char *format, ...) {
 			position = result - sub + 1;
 			memset(consoleBuffer[n],'\0',sizeof(consoleBuffer[n]));
 			snprintf(consoleBuffer[n],sizeof(consoleBuffer[n]),"%.*s",strlen(sub) - position,sub + position);
-			if (n > consolei && n < 15) consolei = n + 1;
+			if (n > consolei && n < 14) consolei = n + 2;
 			return;
 		} else return;
 	}
@@ -1316,6 +1316,7 @@ static void moveSprites() {
 				dead2 = color2;
 				sprites[i].dead = true;
 				msg.sprite = sprites[i];
+				memset(replySprite,0,sizeof(replySprite[0]) * 10);
 				UDSSend(msg); //dead
 			}
 		}
@@ -2270,7 +2271,7 @@ void uds_test()
 					oldDiag = sprites[myNum].diag;
 					sprites[myNum].node = myNode;
 					strncpy(sprites[myNum].username,myName,sizeof(myName));
-					memset(replySprite,1,sizeof(replySprite[0]) * 10);
+					memset(replySprite,0,sizeof(replySprite[0]) * 10);
 					msg.sprite = sprites[myNum];
 					lastSprite = svcGetSystemTick();
 					UDSSend(msg);
@@ -2445,7 +2446,7 @@ void uds_test()
 							if (msg.sender == msg.sprite.image) sprites[msg.sprite.image] = msg.sprite;
 							//drawSprite(sprites[img].x >> 8, sprites[img].y >> 8, 2, 2, img);
 							if (everyoneElseIsDead()) {
-								if (getHighestScore() == myNum && allReplied(replyScore)) { sprites[myNum].dead = true; msg.sprite = sprites[myNum]; memset(replySprite,1,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); UDSSend(msg); }
+								if (getHighestScore() == myNum && allReplied(replyScore)) { sprites[myNum].dead = true; msg.sprite = sprites[myNum]; memset(replySprite,0,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); UDSSend(msg); }
 							}
 						}
 					}
@@ -2460,7 +2461,7 @@ void uds_test()
 			}
 			keepConsole();
 			if (everyoneElseIsDead()) {
-				if (getHighestScore() == myNum && allReplied(replyScore)) { sprites[myNum].dead = true; sprites[myNum].node = myNode; msg.sprite = sprites[myNum]; memset(replySprite,1,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); UDSSend(msg); }
+				if (getHighestScore() == myNum && allReplied(replyScore)) { sprites[myNum].dead = true; sprites[myNum].node = myNode; msg.sprite = sprites[myNum]; memset(replySprite,0,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); UDSSend(msg); }
 			}
 			if (everyoneElseIsDead() && sprites[myNum].dead) break;
 		}
@@ -2570,7 +2571,7 @@ void uds_test()
 				memcpy(&msg,tmpbuf,sizeof(Message));
 				if (debugging) {
 					numLeft++;
-					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0Hsender: %d, image: %d, speed: %d node: %d\n, %d",numLeft + 5,msg.sender,msg.sprite.image,msg.sprite.speed, msg.sprite.node);
+					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"sender: %d, image: %d, speed: %d node: %d, %d",msg.sender,msg.sprite.image,msg.sprite.speed, msg.sprite.node);
 					myprintf(mystring);
 				}
 				if (msg.sprite.speed == 999) {
@@ -2599,7 +2600,7 @@ void uds_test()
 				else if (msg.sprite.speed == 1111) {
 					sprites[msg.sprite.image] = msg.sprite;
 					sprites[msg.sprite.image].node = msg.sprite.node;
-					if (joinedNum != msg.sprite.image) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s has joined as %s%s\n",numLeft + 5,textColors[msg.sprite.image],msg.sprite.username,colorNames[msg.sprite.image],WHITE); myprintf(mystring); }
+					if (joinedNum != msg.sprite.image) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%s%s has joined as %s%s\n",textColors[msg.sprite.image],msg.sprite.username,colorNames[msg.sprite.image],WHITE); myprintf(mystring); }
 					joinedNum = msg.sprite.image;
 					if (myNum == 0) {
 						sprites[myNum].node = myNode;
@@ -2616,7 +2617,7 @@ void uds_test()
 					msg.sprite = sprites[myNum];
 					UDSSend(msg);
 				}
-				else if (msg.sprite.speed == 123 && svcGetSystemTick() - readyLock > TICKS_PER_SEC) { if (!ready[msg.sender]) { numLeft++;  memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s is ready! Waiting on %d more...",numLeft + 5, textColors[msg.sender], msg.sprite.username, WHITE, notReadies() - 1); myprintf(mystring); } ready[msg.sender] = true; if (msg.sprite.image != myNum) { msg.sprite.image = msg.sender; msg.sprite.speed = 777; UDSSend(msg); } }
+				else if (msg.sprite.speed == 123 && svcGetSystemTick() - readyLock > TICKS_PER_SEC) { if (!ready[msg.sender]) { numLeft++;  memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%s%s%s is ready! Waiting on %d more...", textColors[msg.sender], msg.sprite.username, WHITE, notReadies() - 1); myprintf(mystring); } ready[msg.sender] = true; if (msg.sprite.image != myNum) { msg.sprite.image = msg.sender; msg.sprite.speed = 777; UDSSend(msg); } }
 				else if (msg.sprite.speed == 777 && svcGetSystemTick() - readyLock > TICKS_PER_SEC) {
 					if (msg.sprite.image == myNum) replyChange[msg.sender] = true;
 				} else if(msg.sprite.speed == 555) {
@@ -2635,7 +2636,7 @@ void uds_test()
 				}
 			}
 			if (allReady() && num_bikes > 1 && !lastScore) { 
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0HStarting game....\n",numLeft + 6);  
+				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Starting game....\n");  
 				myprintf(mystring);
 				if (myNum == 0) { 
 					msg.sprite = sprites[myNum]; 
@@ -2653,13 +2654,13 @@ void uds_test()
 				numLeft = 0;
 				for (int i = 0; i < num_bikes; i++) {
 					numLeft++;
-					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0HSprite %d",numLeft + 5, i);
+					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Sprite %d",i);
 					myprintf(mystring);
 					numLeft++;
-					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H  username: %s",numLeft + 5, sprites[i].username,numLeft + 5);
+					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  username: %s", sprites[i].username,numLeft + 5);
 					myprintf(mystring);
 					numLeft++;
-					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H  image: %d",numLeft + 5, sprites[i].image,numLeft + 5);
+					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  image: %d", sprites[i].image,numLeft + 5);
 					myprintf(mystring);
 				}
 			}
@@ -2674,7 +2675,7 @@ void uds_test()
 					memset(replyChange,0,sizeof(replyChange[0]) * 10); 
 					UDSSend(msg); 
 					numLeft++; 
-					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s is ready! Waiting on %d more...",numLeft +5,textColors[myNum],sprites[myNum].username,WHITE,notReadies() - 1); 
+					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%s%s%s is ready! Waiting on %d more...",textColors[myNum],sprites[myNum].username,WHITE,notReadies() - 1); 
 					myprintf(mystring);
 				} 
 				ready[myNum] = true;  
@@ -2700,7 +2701,7 @@ void uds_test()
 						numLeft++;
 						if (quit < 0) {
 							numLeft++;
-							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0HA player has crashed...",numLeft + 5);
+							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"A player has crashed...");
 							myprintf(mystring);
 							errorQuit = svcGetSystemTick();
 							while (1) {
@@ -2716,14 +2717,14 @@ void uds_test()
 								if (errorQuit != 0 && svcGetSystemTick() - errorQuit > TICKS_PER_SEC * 4) {
 									numLeft++;
 									if (numLeft >= 15) { myconsoleClear(); numLeft = 0; }
-									memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%sError: unknown person left. Removing a color...%s",numLeft + 5,RED,WHITE);
+									memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%sError: unknown person left. Removing a color...%s",RED,WHITE);
 									myprintf(mystring);
 									num_bikes = constatus.total_nodes;
 									memset(replyChange,1,sizeof(replyChange[0]) * 10);
 									memset(replySprite,1,sizeof(replySprite[0]) * 10);
 									if (myNum >= num_bikes) {
 										myNum = num_bikes - 1;
-										memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H  You are now %s%s%s!",numLeft + 5,textColors[myNum],colorNames[myNum],WHITE);
+										memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  You are now %s%s%s!",textColors[myNum],colorNames[myNum],WHITE);
 										myprintf(mystring);
 									}
 									errorQuit = 0;
@@ -2762,14 +2763,14 @@ void uds_test()
 										oldQuit = quit;
 										numLeft++;
 										if (numLeft + num_bikes - quit >= 15) { myconsoleClear(); numLeft = 0; }
-										memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s has left the game.%s\n",numLeft + 5,textColors[quit],quitName,WHITE);
+										memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%s%s has left the game.%s\n",textColors[quit],quitName,WHITE);
 										myprintf(mystring);
 										if (quit > 0 && quit < num_bikes - 1) {
 											if (quit < myNum) myNum--;
 											for (int i = quit; i < num_bikes - 1; i++) {
 												numLeft++;
-												if (i == myNum) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H  You are now %s%s%s!",numLeft + 5,textColors[myNum],colorNames[myNum],WHITE); }
-												else { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H  %s%s%s is now %s%s%s!",numLeft + 5, textColors[i + 1], sprites[i+1].username,WHITE, textColors[i],colorNames[i],WHITE); }
+												if (i == myNum) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  You are now %s%s%s!",textColors[myNum],colorNames[myNum],WHITE); }
+												else { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  %s%s%s is now %s%s%s!", textColors[i + 1], sprites[i+1].username,WHITE, textColors[i],colorNames[i],WHITE); }
 												myprintf(mystring);
 												sprites[i] = sprites[i+1];
 												sprites[i].image = i;
@@ -2788,14 +2789,14 @@ void uds_test()
 						else {
 							joinedNum = 0;
 							if (numLeft + num_bikes - quit >= 15) { myconsoleClear(); numLeft = 0; }
-							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s has left the game.%s\n",numLeft + 5,textColors[quit],quitName,WHITE);
+							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%s%s has left the game.%s\n",textColors[quit],quitName,WHITE);
 							myprintf(mystring);
 							if (quit > 0 && quit < num_bikes - 1) {
 								if (quit < myNum) myNum--;
 								for (int i = quit; i < num_bikes - 1; i++) {
 									numLeft++;
-									if (i == myNum) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H  You are now %s%s%s!",numLeft + 5,textColors[myNum],colorNames[myNum],WHITE); }
-									else memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H  %s%s%s is now %s%s%s!",numLeft + 5, textColors[i + 1], sprites[i+1].username,WHITE, textColors[i],colorNames[i],WHITE);
+									if (i == myNum) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  You are now %s%s%s!",textColors[myNum],colorNames[myNum],WHITE); }
+									else memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  %s%s%s is now %s%s%s!", textColors[i + 1], sprites[i+1].username,WHITE, textColors[i],colorNames[i],WHITE);
 									myprintf(mystring);
 									sprites[i] = sprites[i+1];
 									sprites[i].image = i;
