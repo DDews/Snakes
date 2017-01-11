@@ -2614,7 +2614,7 @@ void uds_test()
 		u64 readyLock = 0;
 		readyLock = svcGetSystemTick();
 		inGame = false;
-		while (1) {
+		while (aptMainLoop()) {
 			C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target2);
 			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &textprojection);
@@ -3014,7 +3014,7 @@ int main(int argc, char **argv) {
 	if (debugging) if (CATASTROPHIC_FAILURE) {
 		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%sCATASTROPHIC_FAILURE",RED);
 		myprintf(mystring);
-		while (1) {
+		while (aptMainLoop()) {
 			keepConsole();
 			gfxFlushBuffers();
 			gfxSwapBuffers();
@@ -3036,7 +3036,7 @@ int main(int argc, char **argv) {
 			memset(replySprite,0,sizeof(replySprite[0]) * 10);
 			lastSprite = svcGetSystemTick(); 
 			if (debugging) myprintf("Sending quit message...");
-			while (1) {
+			while (aptMainLoop()) {
 				keepConsole();
 				gfxFlushBuffers();
 				gfxSwapBuffers();
@@ -3107,7 +3107,7 @@ int main(int argc, char **argv) {
 	if (!CATASTROPHIC_FAILURE) {
 		if (debugging) myprintf("You were successfully were removed from the game.");
 		if (debugging) {
-			while (1) {
+			while (aptMainLoop()) {
 				keepConsole();
 				gfxFlushBuffers();
 				gfxSwapBuffers();
