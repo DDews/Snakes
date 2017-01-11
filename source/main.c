@@ -1561,8 +1561,6 @@ void uds_test()
 
 		keepConsole();
 
-		gfxFlushBuffers();
-		gfxSwapBuffers();
 
 
 		//myprintf("Version %s\n\nHold A to host\nPress B to scan for a host.\nPress Y to change name.\nPress X for QRCode to latest release.\nPress START to exit.\n",VERSION);
@@ -1579,7 +1577,7 @@ void uds_test()
 		else if (kDown & KEY_Y) {
 			if (strstr(overwriteName,"Cheater") == NULL) {
 				static SwkbdState swkbd;
-				static char mybuf[20];
+				static char mybuf[50];
 				static SwkbdStatusData swkbdStatus;
 				static SwkbdLearningData swkbdLearning;
 				SwkbdButton button = SWKBD_BUTTON_NONE;
@@ -1592,9 +1590,15 @@ void uds_test()
 				
 				swkbdSetButton(&swkbd, SWKBD_BUTTON_RIGHT, "Done", true);
 				swkbdSetFeatures(&swkbd, SWKBD_PREDICTIVE_INPUT);
-				SwkbdDictWord words[2];
-				swkbdSetDictWord(&words[0], "lenny", "( ͡° ͜ʖ ͡°)");
+				SwkbdDictWord words[8];
+				swkbdSetDictWord(&words[0], "put table back", "┬──┬ ノ( ゜-゜ノ)");
 				swkbdSetDictWord(&words[1], "shrug", "¯\\_(ツ)_/¯");
+				swkbdSetDictWord(&words[2], "flip", "(ノ°□°）ノ ~ ┻━┻");
+				swkbdSetDictWord(&words[3], "happy", "( ﾟヮﾟ)");
+				swkbdSetDictWord(&words[4], "glasses", "(-■_■)");
+				swkbdSetDictWord(&words[5], "kiss", "(づ￣ ³￣)づ");
+				swkbdSetDictWord(&words[6], "fuck", "凸(-_-)凸");
+				swkbdSetDictWord(&words[7], "pig", "（´・ω・ `）");
 				swkbdSetDictionary(&swkbd, words, sizeof(words)/sizeof(SwkbdDictWord));
 				static bool reload = false;
 				swkbdSetStatusData(&swkbd, &swkbdStatus, reload, true);
@@ -2687,7 +2691,7 @@ void uds_test()
 				else if (getHighestScore() == myNum) myprintf("\x1b[0;0HA winner is YOU!");
 				else { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[getHighestScore()],sprites[getHighestScore()].username,WHITE); myprintf(mystring); }
 			} else {
-				if (myNum == lastDead) myprintf("\x1b[0;0HA winner is YOU!!");
+				if (myNum == lastDead) myprintf("\x1b[0;0HA winner is YOU!");
 				else { snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[lastDead],sprites[lastDead].username,WHITE); myprintf(mystring); }
 			}
 			memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[1;0HScore: ");
