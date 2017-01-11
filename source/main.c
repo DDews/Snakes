@@ -102,7 +102,7 @@ static int textuLoc_projection;
 static C3D_Mtx textprojection;
 
 int lastDead = 0;
-char mystring[100];
+char mystring[200];
 bool cheats = false;
 float oldpx = 0;
 float oldpy = 0;
@@ -1061,8 +1061,10 @@ static void printScore() {
 			if (!sprites[i].dead) {
 				memset(living,'\0',sizeof(living));
 				snprintf(living,sizeof(living),"%s%s%s",textColors[i],sprites[i].username,WHITE);
-				strcat(mystring,living);
-				if (i < actual_bikes - 1) strcat(mystring,", ");
+				if (strlen(mystring) < 140) {
+					strcat(mystring,living);
+					if (i < actual_bikes - 1) strcat(mystring,", ");
+				}
 			}
 		}
 		myprintf(mystring);
