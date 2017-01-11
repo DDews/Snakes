@@ -443,13 +443,12 @@ myprintf(const char *format, ...) {
 		} else return;
 	}
 	if (consolei >= 15) {
-		for (int i = 0; i < 15; i++) {
+		for (int i = 0; i < 14; i++) {
 			strncpy(consoleBuffer[i],consoleBuffer[i+1],sizeof(consoleBuffer[i]) - 1);
 		}
+		consolei = 15;
 	}
-	int i;
 	snprintf(consoleBuffer[consolei], sizeof(consoleBuffer[consolei]), "%s", format);
-	for (i=0; format[i]; format[i]=='\n' ? i++ : *format++);
 	if (consolei < 15) consolei += 1;
 	return;
 }
@@ -2504,6 +2503,7 @@ void uds_test()
 			char k[10];
 			memset(te,'\0',sizeof(te));
 			snprintf(te,sizeof(te),"Score: ");
+			myprintf("\x1b[2;0H ");
 			memset(scores,'\0',sizeof(scores));
 				for (int i = 0; i < NUM_SPRITES; i++) {
 					memset(scores,'\0',sizeof(scores));
