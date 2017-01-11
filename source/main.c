@@ -27,8 +27,9 @@
 #include "bike_png.h"
 #include "qrcode_png.h"
 
-#define VERSION "0.1.4"
+#define VERSION "0.1.5"
 
+#define TICK "◯"
 #define TICKS_PER_MS 268123
 #define TICKS_PER_SEC 268123480
 #define CLEAR_COLOR 0x000000FF
@@ -87,7 +88,9 @@ u64 waitForFinish = 0;
 bool uds_enabled = false;
 bool readyToStart = false;
 bool debugging = false;
-
+int numOptions = 7;
+bool options[7] = {false,false,false,false,false,false,false};
+char optionNames[7][20] = {"Boundaries kill", "Tron mode", "Disable Diagonals", "Disable A", "Disable B", "Disable Y", "No apple"};
 static DVLB_s* vshader_dvlb;
 static shaderProgram_s program;
 static int uLoc_projection;
@@ -98,6 +101,7 @@ static shaderProgram_s textprogram;
 static int textuLoc_projection;
 static C3D_Mtx textprojection;
 
+int lastDead = 0;
 char mystring[100];
 bool cheats = false;
 float oldpx = 0;
@@ -227,7 +231,22 @@ int oldbikes;
 u8* frameBuf;
 static float printy = 10.0;
 static float printx = 10.0;
-
+int optionsToInt() {
+    int ret = 0;
+    int tmp;
+    for (int i = 0; i < numOptions; i++) {
+        tmp = options[i];
+        ret |= tmp << (i);
+    }
+    return ret;
+}
+setOptions(unsigned int n) {
+	for (unsigned int i = 0; i != numOptions; ++i)
+	{
+	  options[i] = n & 1;
+	  n /= 2;
+	}
+}
 static void screen_get_string_size_internal(float* width, float* height, const char* text, float scaleX, float scaleY, bool oneLine, bool wrap, float wrapX) {
     float w = 0;
     float h = 0;
@@ -560,7 +579,7 @@ void drawSprite( int x, int y, int width, int height, int image ) {
     C3D_TexEnvOp(env, C3D_Both, GPU_TEVOP_RGB_SRC_COLOR, GPU_TEVOP_RGB_SRC_COLOR, GPU_TEVOP_RGB_SRC_COLOR);
     C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
 	u32 color = getColor(x,y);
-	if (image < 10) if (image != 9 && color != colors[8] && color) return;
+	if (image < 10 && width < 100 && height < 100) if (image != 9 && color != colors[8] && color) return;
 	float left = images[image].left;
 	float right = images[image].right;
 	float top = images[image].top;
@@ -771,7 +790,8 @@ static void setSprites() {
 		path[0][i].x = sprites[i].x;
 		path[0][i].y = sprites[i].y;
 
-		sprites[i].length = 40;
+		if (!options[1]) sprites[i].length = 40;
+		else sprites[i].length = 240 * 400;
 		growth[i] = 0;
 		currentPath[i] = 1;
 		pathPos[i] = 0;
@@ -780,18 +800,24 @@ static void setSprites() {
 			sprites[i].dx = -sprites[i].dx;
 		if(rand() & 1)
 			sprites[i].dy = -sprites[i].dy;
+		if(options[0]) {
+			if ((sprites[i].x >> 8) < 100) sprites[i].dx = abs(sprites[i].dx);
+			if ((sprites[i].x >> 8) > 300 && sprites[i].dx) sprites[i].dx = abs(sprites[i].dx) * -1;
+		}
+	}
+	if (options[6]) {
+		apple.x = 500 << 8;
+		apple.y = 500 << 8;
 	}
 }
 static void changeApple() {
-	int oldx = apple.x;
-	int oldy = apple.y;
+	drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 9);
 	apple.x = (rand() % (400 - 32)) << 8;
 	apple.y = (rand() % (240 - 32)) << 8;
 	while (getColor(apple.x >> 8, apple.y >> 8)) {
 		apple.x = (rand() % (400 - 32)) << 8;
 		apple.y = (rand() % (240 - 32)) << 8;
 	}
-	drawSprite(oldx >> 8, oldy >> 8, 2, 2, 9);
 	drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
 	msg.sprite = sprites[myNum];
 	msg.sprite.image = myNum;
@@ -1018,7 +1044,8 @@ static void sceneInit(void) {
 
 }
 static void printScore() {
-	memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[0;0HScore: ");
+	if (!options[6]) {
+		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[0;0HScore: ");
 		char scores[12];
 		for (int i = 0; i < num_bikes; i++) {
 			snprintf(scores,sizeof(scores),"%s%d", textColors[i],score[i]);
@@ -1026,6 +1053,20 @@ static void printScore() {
 			if (i < num_bikes - 1) { snprintf(scores,sizeof(scores)," %s- ",WHITE); strcat(mystring,scores); }
 		}
 		myprintf(mystring);
+	} else {
+		memset(mystring,'\0',sizeof(mystring));
+		snprintf(mystring,sizeof(mystring),"\x1b[0;0HAlive: ");
+		char living[50];
+		for (int i = 0; i < actual_bikes; i++) {
+			if (!sprites[i].dead) {
+				memset(living,'\0',sizeof(living));
+				snprintf(living,sizeof(living),"%s%s%s",textColors[i],sprites[i].username,WHITE);
+				strcat(mystring,living);
+				if (i < actual_bikes - 1) strcat(mystring,", ");
+			}
+		}
+		myprintf(mystring);
+	}
 	death = dead;
 	if (!death) death = dead2;
 	if (sprites[myNum].dead) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[1;0H%sYou are %sdead%s (%s%s%s)",WHITE,RED,WHITE,textColors[getKiller(death)],sprites[getKiller(death)].username,WHITE); myprintf(mystring); }
@@ -1034,12 +1075,18 @@ static void printScore() {
 		myprintf(mystring);
 		if (everyoneElseIsDead()) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[6;0HGet %d more points!",theHighest() - score[myNum] + 1); myprintf(mystring); }
 	}
-	memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[2;0HHold %sA%s to move Faster.",RED,WHITE);
-	myprintf(mystring);
-	memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[3;0HHold %sB%s to move Slower.",YELLOW,WHITE);
-	myprintf(mystring);
-	memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[4;0HPress %sY%s to teleport the apple once.",GREEN,WHITE);
-	myprintf(mystring);
+	if (!options[3]) {
+		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[2;0HHold %s%s to move Faster.",RED,WHITE);
+		myprintf(mystring);
+	}
+	if (!options[4]) {
+		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[3;0HHold %s%s to move Slower.",YELLOW,WHITE);
+		myprintf(mystring);
+	}
+	if (!options[5]) {
+		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[4;0HPress %s%s to teleport the apple once.",GREEN,WHITE);
+		myprintf(mystring);
+	}
 	int x = 5;
 	for (int i = actual_bikes; i < num_bikes; i++) {
 		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s has joined the game.",x + i - actual_bikes,textColors[i],sprites[i].username,WHITE);
@@ -1234,6 +1281,35 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 	path[currentPath[img]][img].y = (y << 8);
 	path[currentPath[img]][img].x = (x << 8);
 }
+static void gameOptions() {
+	myconsoleClear();
+	char onOrOff[5];
+	char selectedColor[5];
+	int selected = 0;
+	u32 kDown;
+	while (1) {
+		keepConsole();
+		for (int i = 0; i < numOptions; i++) {
+			if (options[i]) snprintf(onOrOff,sizeof(onOrOff),WHITE);
+			else snprintf(onOrOff,sizeof(onOrOff),BLACK);
+			if (selected == i) snprintf(selectedColor,sizeof(selectedColor),YELLOW);
+			else snprintf(selectedColor,sizeof(selectedColor),WHITE);
+			snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s%s%s",i,onOrOff,TICK,selectedColor,optionNames[i],WHITE);
+			myprintf(mystring);
+		}
+		hidScanInput();
+		kDown = hidKeysDown();
+		if (kDown & KEY_DUP || kDown & KEY_CPAD_UP) selected--;
+		else if (kDown & KEY_DDOWN || kDown & KEY_CPAD_DOWN) selected++;
+		if (selected >= numOptions) selected = 0;
+		else if (selected < 0) selected = numOptions - 1;
+		if (kDown & KEY_A) {
+			if (options[selected]) options[selected] = false;
+			else options[selected] = true;
+		}
+		if (kDown & KEY_START || kDown & KEY_SELECT || kDown & KEY_B) break;
+	}
+}
 //---------------------------------------------------------------------------------
 static void moveSprites() {
 //---------------------------------------------------------------------------------
@@ -1314,9 +1390,11 @@ static void moveSprites() {
 			else if ((color1 != colors[8] && color2 != colors[8]) && (color1 > 0 || color2 > 0)) {
 				dead = color1;
 				dead2 = color2;
+				lastDead = i;
 				sprites[i].dead = true;
 				msg.sprite = sprites[i];
 				memset(replySprite,0,sizeof(replySprite[0]) * 10);
+				lastSprite = svcGetSystemTick();
 				UDSSend(msg); //dead
 			}
 		}
@@ -1357,6 +1435,11 @@ static void sceneExit(void) {
 static SwkbdCallbackResult wrongName(void* user, const char** ppMessage, const char* text, size_t textlen)
 {
 
+	if(strstr(text,"\x1b["))
+	{
+		*ppMessage = "Nope.";
+		return SWKBD_CALLBACK_CONTINUE;
+	}
 	if(strstr(text, "!."))
 	{
 		*ppMessage = "Nice try.";
@@ -1388,7 +1471,7 @@ void uds_test()
 
 	u32 recv_buffer_size = UDS_DEFAULT_RECVBUFSIZE;
 	u32 wlancommID = 0x783a9dab;//Unique ID, change this to your own.
-	char *passphrase = "dandewsudssnake saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
+	char *passphrase = "dandewsudssnake.1.5 saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
 
 	conntype = UDSCONTYPE_Client;
 
@@ -1420,7 +1503,8 @@ void uds_test()
 	memset(mystring,'\0',sizeof(mystring)); 
 	snprintf(mystring,sizeof(mystring),"Version %s",VERSION);
 	myprintf(mystring);
-	myprintf("\x1b[2;0HHold A to host"); myprintf("Press B to scan for a host."); myprintf("Press Y to change name."); myprintf("Press START to exit.");
+	myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit.");
+	bool ignoreB = false;
 	while (aptMainLoop()) {
 		hidScanInput();
 
@@ -1443,43 +1527,47 @@ void uds_test()
 		// Respond to user input
 		u32 kDown = hidKeysDown();
 		u32 kHeld = hidKeysHeld();
+		u32 kUp = hidKeysUp();
 		if (kDown & KEY_START) return;
+		if (kDown & KEY_SELECT) { gameOptions(); myconsoleClear(); ignoreB = true; snprintf(mystring,sizeof(mystring),"Version %s",VERSION); myprintf(mystring); myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit."); }
 		if (kDown & KEY_L) { debugging = true; myprintf("Debugging turned on."); }
 		if (kDown & KEY_A) { hosting = 1; break; }
-		if (kHeld & KEY_R && kDown & KEY_X) { cheats = true; myprintf("Move the apple with touchscreen!"); }
+		if (kHeld & KEY_R && kDown & KEY_X) { cheats = true; myprintf("Move the apple with touchscreen!"); snprintf(overwriteName,sizeof(overwriteName),"Cheater"); }
 		else if (kDown & KEY_X) qrcode = true;
 		else if (kDown & KEY_Y) {
-			static SwkbdState swkbd;
-			static char mybuf[20];
-			static SwkbdStatusData swkbdStatus;
-			static SwkbdLearningData swkbdLearning;
-			SwkbdButton button = SWKBD_BUTTON_NONE;
-			swkbdInit(&swkbd, SWKBD_TYPE_NORMAL, 3, -1);
-			swkbdSetValidation(&swkbd, SWKBD_NOTEMPTY_NOTBLANK, 0, 0);
-			swkbdSetFilterCallback(&swkbd, wrongName, NULL);
-			swkbdSetInitialText(&swkbd, mybuf);
-			swkbdSetHintText(&swkbd, "Please enter your name");
-			swkbdSetButton(&swkbd, SWKBD_BUTTON_LEFT, "Cancel", false);
-			
-			swkbdSetButton(&swkbd, SWKBD_BUTTON_RIGHT, "Done", true);
-			swkbdSetFeatures(&swkbd, SWKBD_PREDICTIVE_INPUT);
-			SwkbdDictWord words[2];
-			swkbdSetDictWord(&words[0], "lenny", "( ͡° ͜ʖ ͡°)");
-			swkbdSetDictWord(&words[1], "shrug", "¯\\_(ツ)_/¯");
-			swkbdSetDictionary(&swkbd, words, sizeof(words)/sizeof(SwkbdDictWord));
-			static bool reload = false;
-			swkbdSetStatusData(&swkbd, &swkbdStatus, reload, true);
-			swkbdSetLearningData(&swkbd, &swkbdLearning, reload, true);
-			reload = true;
-			button = swkbdInputText(&swkbd, mybuf, sizeof(mybuf));
-			if (button != SWKBD_BUTTON_NONE && strlen(mybuf) > 0) { 
-				memset(overwriteName,'\0',sizeof(overwriteName));
-				strncpy(overwriteName,mybuf,sizeof(overwriteName));
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Welcome, %s",overwriteName);
-				myprintf(mystring);
-			} else myprintf("Name set to default.");
+			if (strstr(overwriteName,"Cheater") == NULL) {
+				static SwkbdState swkbd;
+				static char mybuf[20];
+				static SwkbdStatusData swkbdStatus;
+				static SwkbdLearningData swkbdLearning;
+				SwkbdButton button = SWKBD_BUTTON_NONE;
+				swkbdInit(&swkbd, SWKBD_TYPE_NORMAL, 3, -1);
+				swkbdSetValidation(&swkbd, SWKBD_NOTEMPTY_NOTBLANK, 0, 0);
+				swkbdSetFilterCallback(&swkbd, wrongName, NULL);
+				swkbdSetInitialText(&swkbd, mybuf);
+				swkbdSetHintText(&swkbd, "Please enter your name");
+				swkbdSetButton(&swkbd, SWKBD_BUTTON_LEFT, "Cancel", false);
+				
+				swkbdSetButton(&swkbd, SWKBD_BUTTON_RIGHT, "Done", true);
+				swkbdSetFeatures(&swkbd, SWKBD_PREDICTIVE_INPUT);
+				SwkbdDictWord words[2];
+				swkbdSetDictWord(&words[0], "lenny", "( ͡° ͜ʖ ͡°)");
+				swkbdSetDictWord(&words[1], "shrug", "¯\\_(ツ)_/¯");
+				swkbdSetDictionary(&swkbd, words, sizeof(words)/sizeof(SwkbdDictWord));
+				static bool reload = false;
+				swkbdSetStatusData(&swkbd, &swkbdStatus, reload, true);
+				swkbdSetLearningData(&swkbd, &swkbdLearning, reload, true);
+				reload = true;
+				button = swkbdInputText(&swkbd, mybuf, sizeof(mybuf));
+				if (button != SWKBD_BUTTON_NONE && strlen(mybuf) > 0) { 
+					memset(overwriteName,'\0',sizeof(overwriteName));
+					strncpy(overwriteName,mybuf,sizeof(overwriteName));
+					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Welcome, %s",overwriteName);
+					myprintf(mystring);
+				} else myprintf("Name set to default.");
+			} else myprintf("You can't change your name with cheats enabled!");
 		}
-		else if((kDown & KEY_B) || (kHeld & KEY_B)) {
+		else if (!ignoreB) if((kDown & KEY_B) || (kHeld & KEY_B)) {
 			myprintf("Scanning...");
 			while (1) {
 				//gspWaitForVBlank();
@@ -1554,8 +1642,9 @@ void uds_test()
 			}
 			myconsoleClear();
 			if (readyToJoin) break;
-			else { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Version %s",VERSION);myprintf(mystring);	myprintf("\x1b[2;0HHold A to host"); myprintf("Press B to scan for a host."); myprintf("Press Y to change name."); myprintf("Press START to exit."); }
+			else { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Version %s",VERSION);myprintf(mystring);	myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit."); }
 		}
+		if (kUp & KEY_B) ignoreB = false;
 
 	}
 	if(total_networks && !hosting)
@@ -1858,6 +1947,7 @@ void uds_test()
 				msg.sprite.speed = 66;
 				msg.sprite.x = apple.x;
 				msg.sprite.y = apple.y;
+				msg.sprite.dx = optionsToInt();
 				UDSResend(replyChange,msg);
 				while (1) {
 					hidScanInput();
@@ -2037,6 +2127,7 @@ void uds_test()
 						if (msg.sender == 0) {
 							apple.x = msg.sprite.x;
 							apple.y = msg.sprite.y;
+							setOptions((unsigned int)msg.sprite.dx);
 							UDSSend(msg);
 						}
 					} else if (msg.sprite.speed == 101) { if (msg.sender == 0) UDSSend(msg); break; }
@@ -2092,6 +2183,19 @@ void uds_test()
 		oldCPos.dx = 0;
 		oldCPos.dy = 0;
 		nextMove = NULL;
+		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+			C3D_FrameDrawOn(target);
+			C3D_TexBind(0, &spritesheet_tex);
+			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
+			if (options[0]) {
+				drawSprite(0,0,1,238,7);
+				drawSprite(0,0,400,1,7);
+				drawSprite(398,0,1,238,7);
+				drawSprite(0,238,396,1,7);
+			}
+			drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
+		C3D_FrameEnd(0);
+		lastDead = 0;
 		while (aptMainLoop()) {
 			if (everyoneElseIsDead() && sprites[myNum].dead) break;
 			if (errorQuit != 0 && svcGetSystemTick() - errorQuit > TICKS_PER_SEC * 3) {
@@ -2177,60 +2281,60 @@ void uds_test()
 				return; // break in order to return to hbmenu
 			}
 			u32 msgtype = NULL;
-			if ((abs(cpos.dy) > 17 || abs(cpos.dx) > 17) && !(oldCPos.dx == 0 && oldCPos.dy == 0)){
-				float dvd = abs(cpos.dy) > abs(cpos.dx) ? abs(cpos.dy) : abs(cpos.dx) / abs(abs(cpos.dy) - abs(cpos.dx));
-				if (dvd < 120 && dvd > 1) {
-					if (cpos.dy > 0 && cpos.dx > 0) {
-						sprites[myNum].diag = NORTHEAST;
-						if (oldMove == MOVE_UP) kDown = KEY_CPAD_RIGHT;
-						else if (oldMove == MOVE_RIGHT) kDown = KEY_CPAD_UP;
-						else if (sprites[myNum].dx != 0) kDown = KEY_CPAD_UP;
-						else kDown = KEY_CPAD_RIGHT;
-					} else if (cpos.dx < 0 && cpos.dy < 0) {
-						sprites[myNum].diag = SOUTHWEST;
-						if (oldMove == MOVE_DOWN) kDown = KEY_CPAD_LEFT;
-						else if (oldMove == MOVE_LEFT) kDown = KEY_CPAD_DOWN;
-						else if (sprites[myNum].dx != 0) kDown = KEY_CPAD_DOWN;
-						else kDown = KEY_CPAD_LEFT;
-					} else if (cpos.dx < 0 && cpos.dy > 0) {
-						sprites[myNum].diag = NORTHWEST;
-						if (oldMove == MOVE_UP) kDown = KEY_CPAD_LEFT;
-						else if (oldMove == MOVE_LEFT) kDown = KEY_CPAD_UP;
-						else if (sprites[myNum].dx != 0) kDown = KEY_CPAD_UP;
-						else kDown = KEY_CPAD_LEFT;
-					} else if (cpos.dx > 0 && cpos.dy < 0) {
-						sprites[myNum].diag = SOUTHEAST;
-						if (oldMove == MOVE_DOWN) kDown = KEY_CPAD_RIGHT;
-						else if (oldMove == MOVE_RIGHT) kDown = KEY_CPAD_DOWN;
-						else if (sprites[myNum].dx != 0) kDown = KEY_CPAD_DOWN;
-						else kDown = KEY_CPAD_RIGHT;
-					} 
-				} else if (cpos.dx != oldCPos.dx || cpos.dy != oldCPos.dy) {
-					if (cpos.dx < 0 && abs(cpos.dx) > abs(cpos.dy)) { if (oldDiag) msgtype = MOVE_LEFT; kDown = KEY_CPAD_LEFT; }
-					else if (cpos.dx > 0 && abs(cpos.dx) > abs(cpos.dy)) { if (oldDiag) msgtype = MOVE_RIGHT; kDown = KEY_CPAD_RIGHT; }
-					else if (cpos.dy < 0 && abs(cpos.dy) > abs(cpos.dx)) { if (oldDiag) msgtype = MOVE_DOWN; kDown = KEY_CPAD_DOWN; } 
-					else if (cpos.dy > 0 && abs(cpos.dy) > abs(cpos.dx)) { if (oldDiag) msgtype = MOVE_UP; kDown = KEY_CPAD_UP; }
+			if (!options[2]) {
+				if ((abs(cpos.dy) > 17 || abs(cpos.dx) > 17) && !(oldCPos.dx == 0 && oldCPos.dy == 0)){
+					float dvd = abs(cpos.dy) > abs(cpos.dx) ? abs(cpos.dy) : abs(cpos.dx) / abs(abs(cpos.dy) - abs(cpos.dx));
+					if (dvd < 120 && dvd > 1) {
+						if (cpos.dy > 0 && cpos.dx > 0) {
+							sprites[myNum].diag = NORTHEAST;
+							if (oldMove == MOVE_UP) kDown |= KEY_CPAD_RIGHT;
+							else if (oldMove == MOVE_RIGHT) kDown |= KEY_CPAD_UP;
+							else if (sprites[myNum].dx != 0) kDown |= KEY_CPAD_UP;
+							else kDown |= KEY_CPAD_RIGHT;
+						} else if (cpos.dx < 0 && cpos.dy < 0) {
+							sprites[myNum].diag = SOUTHWEST;
+							if (oldMove == MOVE_DOWN) kDown |= KEY_CPAD_LEFT;
+							else if (oldMove == MOVE_LEFT) kDown |= KEY_CPAD_DOWN;
+							else if (sprites[myNum].dx != 0) kDown |= KEY_CPAD_DOWN;
+							else kDown |= KEY_CPAD_LEFT;
+						} else if (cpos.dx < 0 && cpos.dy > 0) {
+							sprites[myNum].diag = NORTHWEST;
+							if (oldMove == MOVE_UP) kDown |= KEY_CPAD_LEFT;
+							else if (oldMove == MOVE_LEFT) kDown |= KEY_CPAD_UP;
+							else if (sprites[myNum].dx != 0) kDown |= KEY_CPAD_UP;
+							else kDown |= KEY_CPAD_LEFT;
+						} else if (cpos.dx > 0 && cpos.dy < 0) {
+							sprites[myNum].diag = SOUTHEAST;
+							if (oldMove == MOVE_DOWN) kDown = KEY_CPAD_RIGHT;
+							else if (oldMove == MOVE_RIGHT) kDown = KEY_CPAD_DOWN;
+							else if (sprites[myNum].dx != 0) kDown = KEY_CPAD_DOWN;
+							else kDown |= KEY_CPAD_RIGHT;
+						} 
+					} else if (cpos.dx != oldCPos.dx || cpos.dy != oldCPos.dy) {
+						if (cpos.dx < 0 && abs(cpos.dx) > abs(cpos.dy)) { if (oldDiag) msgtype = MOVE_LEFT; kDown |= KEY_CPAD_LEFT; }
+						else if (cpos.dx > 0 && abs(cpos.dx) > abs(cpos.dy)) { if (oldDiag) msgtype = MOVE_RIGHT; kDown |= KEY_CPAD_RIGHT; }
+						else if (cpos.dy < 0 && abs(cpos.dy) > abs(cpos.dx)) { if (oldDiag) msgtype = MOVE_DOWN; kDown |= KEY_CPAD_DOWN; } 
+						else if (cpos.dy > 0 && abs(cpos.dy) > abs(cpos.dx)) { if (oldDiag) msgtype = MOVE_UP; kDown |= KEY_CPAD_UP; }
+						sprites[myNum].diag = 0;
+					}
+				} else if (oldDiag) {
 					sprites[myNum].diag = 0;
+					if (sprites[myNum].dx > 0) msgtype = MOVE_RIGHT;
+					else if (sprites[myNum].dx < 0) msgtype = MOVE_LEFT;
+					else if (sprites[myNum].dy > 0) msgtype = MOVE_UP;
+					else if (sprites[myNum].dy < 0) msgtype = MOVE_DOWN;
 				}
-			} else if (oldDiag) {
-				sprites[myNum].diag = 0;
-				if (sprites[myNum].dx > 0) msgtype = MOVE_RIGHT;
-				else if (sprites[myNum].dx < 0) msgtype = MOVE_LEFT;
-				else if (sprites[myNum].dy > 0) msgtype = MOVE_UP;
-				else if (sprites[myNum].dy < 0) msgtype = MOVE_DOWN;
 			}
-
 			oldCPos = cpos;
 			//if (debugging) myprintf("cpad: %03d %03d %d %f\n",pos.dx,pos.dy, oldMove, dvd);
-			if (kDown & KEY_Y && !usedSpecial) {
-				usedSpecial = true;
-				memset(replyChange,0,sizeof(replyChange[0]) * 10);
-				changeApple();
+			if (!options[3]) {
+				if (kDown & KEY_A || kHeld & KEY_A) sprites[myNum].speed = 15;
+				else if (kUp & KEY_A) sprites[myNum].speed = 45;
 			}
-			if (kDown & KEY_A || kHeld & KEY_A) sprites[myNum].speed = 15;
-			else if (kUp & KEY_A) sprites[myNum].speed = 45;
-			else if (kDown & KEY_B || kHeld & KEY_B) sprites[myNum].speed = 90;
-			else if (kUp & KEY_B) sprites[myNum].speed = 45;
+			if (!options[4]) {
+				if (kDown & KEY_B || kHeld & KEY_B) sprites[myNum].speed = 90;
+				else if (kUp & KEY_B) sprites[myNum].speed = 45;
+			}
 			int prevn = currentPath[myNum] - 1;
 			if (prevn < 0) prevn = 240 * 400;
 			if ((kDown & KEY_CPAD_UP || kDown & KEY_DUP || nextMove == MOVE_UP) && !sprites[myNum].dy) {
@@ -2313,13 +2417,14 @@ void uds_test()
 			}
 			if (sprites[myNum].dead && !olddead) clearFlag = true;
 			if (oldbikes != num_bikes) { clearFlag = true; oldbikes = num_bikes; }
-			if (clearFlag) {
+			printScore();
+			/*if (clearFlag) {
 				//if (!debugging) myconsoleClear();
 				printScore();
 				for (int i = 0; i < num_bikes; i++) oldscore[i] = score[i];
 					olddead = sprites[myNum].dead;
 				clearFlag = false;
-			}
+			}*/
 			gfxFlushBuffers();
 			gfxSwapBuffers();
 			
@@ -2331,6 +2436,11 @@ void uds_test()
 					C3D_FrameDrawOn(target);
 					C3D_TexBind(0, &spritesheet_tex);
 					C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
+					if (!options[5] && !options[6]) if (kDown & KEY_Y && !usedSpecial) {
+						usedSpecial = true;
+						memset(replyChange,0,sizeof(replyChange[0]) * 10);
+						changeApple();
+					}
 					if (cheats && px && py) {
 						drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 9);
 						apple.x = (int)px;
@@ -2443,6 +2553,7 @@ void uds_test()
 									u32 imgy = msg.sprite.y >> 8; 
 									
 									if (msg.sprite.dead) {
+										lastDead = msg.sprite.image;
 										eraseOvershoot(msg.sprite);
 									}
 									else finishLine(currentPath[img],pathx << 8, pathy << 8, imgx << 8, imgy << 8, msg.sprite, img);
@@ -2451,7 +2562,15 @@ void uds_test()
 							if (msg.sender == msg.sprite.image) sprites[msg.sprite.image] = msg.sprite;
 							//drawSprite(sprites[img].x >> 8, sprites[img].y >> 8, 2, 2, img);
 							if (everyoneElseIsDead()) {
-								if (getHighestScore() == myNum && allReplied(replyScore)) { sprites[myNum].dead = true; msg.sprite = sprites[myNum]; memset(replySprite,0,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); UDSSend(msg); }
+								if (options[6] && !sprites[myNum].dead) {
+									lastDead = myNum;
+									sprites[myNum].dead = true;
+									msg.sprite = sprites[myNum];
+									memset(replySprite,0,sizeof(replySprite[0]) * 10);
+									lastSprite = svcGetSystemTick();
+									UDSSend(msg);
+								}
+								else if (getHighestScore() == myNum && allReplied(replyScore)) { lastDead = myNum; sprites[myNum].dead = true; msg.sprite = sprites[myNum]; memset(replySprite,0,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); UDSSend(msg); }
 							}
 						}
 					}
@@ -2466,7 +2585,15 @@ void uds_test()
 			}
 			keepConsole();
 			if (everyoneElseIsDead()) {
-				if (getHighestScore() == myNum && allReplied(replyScore)) { sprites[myNum].dead = true; sprites[myNum].node = myNode; msg.sprite = sprites[myNum]; memset(replySprite,0,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); UDSSend(msg); }
+				if (options[6] && !sprites[myNum].dead) {
+					lastDead = myNum;
+					sprites[myNum].dead = true;
+					msg.sprite = sprites[myNum];
+					memset(replySprite,0,sizeof(replySprite[0]) * 10);
+					lastSprite = svcGetSystemTick();
+					UDSSend(msg);
+				}
+				else if (getHighestScore() == myNum && allReplied(replyScore)) { lastDead = myNum; sprites[myNum].dead = true; sprites[myNum].node = myNode; msg.sprite = sprites[myNum]; memset(replySprite,0,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); UDSSend(msg); }
 			}
 			if (everyoneElseIsDead() && sprites[myNum].dead) break;
 		}
@@ -2499,9 +2626,14 @@ void uds_test()
 				lastSprite = svcGetSystemTick();
 				UDSResend(replySprite,msg);
 			} //Be sure to still resend my death msg if someone hasn't gotten it
-			if (itsATie()) myprintf("\x1b[0;0HIt's a TIE!");
-			else if (getHighestScore() == myNum) myprintf("\x1b[0;0HA winner is YOU!");
-			else { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[getHighestScore()],sprites[getHighestScore()].username,WHITE); myprintf(mystring); }
+			if (!options[6]) {
+				if (itsATie()) myprintf("\x1b[0;0HIt's a TIE!");
+				else if (getHighestScore() == myNum) myprintf("\x1b[0;0HA winner is YOU!");
+				else { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[getHighestScore()],sprites[getHighestScore()].username,WHITE); myprintf(mystring); }
+			} else {
+				if (myNum == lastDead) myprintf("\x1b[0;0HA winner is YOU!!");
+				else { snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[lastDead],sprites[lastDead].username,WHITE); myprintf(mystring); }
+			}
 			memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[1;0HScore: ");
 			char scores[10];
 			float widths[10];
@@ -2539,6 +2671,7 @@ void uds_test()
 			memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[3;0H%sPress A if you're ready!",WHITE);
 			myprintf(mystring);
 			myprintf("\x1b[4;0HPress START to quit.");
+			if (!myNum) myprintf("\x1b[5;0HPress SELECT to set game modes!");
 			if (numLeft >= 15) { myconsoleClear(); numLeft = 0; }
 			if (num_bikes == 1) { numLeft++; num_bikes--; memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Everyone has left the game!"); myprintf(mystring); }
 			if (!allReplied(replyChange) && svcGetSystemTick() - lastChange > TICKS_PER_MS * 15 * 30 * lagMult()) {
@@ -2649,26 +2782,15 @@ void uds_test()
 					msg.sprite.speed = 555;
 					memset(replyScore,0,sizeof(replyScore[0]) * 10);
 					UDSSend(msg);
-					lastScore = svcGetSystemTick();
 				}
+				lastScore = svcGetSystemTick();
 			}
 
 
 			if (kDown & KEY_B && debugging) { numLeft++; memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%d",numLeft + 5, (svcGetSystemTick() - waitForFinish) / TICKS_PER_SEC); myprintf(mystring); }
-			if (kDown & KEY_SELECT && debugging) {
-				myconsoleClear();
-				numLeft = 0;
-				for (int i = 0; i < num_bikes; i++) {
-					numLeft++;
-					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Sprite %d",i);
-					myprintf(mystring);
-					numLeft++;
-					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  username: %s", sprites[i].username,numLeft + 5);
-					myprintf(mystring);
-					numLeft++;
-					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  image: %d", sprites[i].image,numLeft + 5);
-					myprintf(mystring);
-				}
+			if (myNum == 0 && kDown & KEY_SELECT) {
+				if (!ready[0]) { gameOptions(); myconsoleClear(); }
+				else myprintf("Can't edit modes when you are ready!");
 			}
 			if (kDown & KEY_A && svcGetSystemTick() - readyLock > TICKS_PER_SEC) { 
 				if (num_bikes <= 1) break; 
