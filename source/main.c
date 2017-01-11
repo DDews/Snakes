@@ -88,9 +88,9 @@ u64 waitForFinish = 0;
 bool uds_enabled = false;
 bool readyToStart = false;
 bool debugging = false;
-int numOptions = 7;
-bool options[7] = {false,false,false,false,false,false,false};
-char optionNames[7][20] = {"Boundaries kill", "Tron mode", "Disable Diagonals", "Disable A", "Disable B", "Disable Y", "No apple"};
+int numOptions = 8;
+bool options[8] = {false,false,false,false,false,false,false,false};
+char optionNames[8][20] = {"Boundaries kill", "Tron mode", "Disable Diagonals", "Disable A", "Disable B", "Disable Y", "Enable R", "No apple"};
 static DVLB_s* vshader_dvlb;
 static shaderProgram_s program;
 static int uLoc_projection;
@@ -170,6 +170,7 @@ typedef struct {
 	bool dead;
 	int node;
 	int diag;
+	bool forwards;
 	char username[50];
 }Sprite;
 
@@ -785,6 +786,7 @@ static void setSprites() {
 		sprites[i].speed = 45;
 		sprites[i].dead = false;
 		sprites[i].diag = 0;
+		sprites[i].forwards = true;
 
 		memset(sprites[i].username,'\0',sizeof(sprites[i].username));
 		path[0][i].x = sprites[i].x;
@@ -805,7 +807,7 @@ static void setSprites() {
 			if ((sprites[i].x >> 8) > 300 && sprites[i].dx) sprites[i].dx = abs(sprites[i].dx) * -1;
 		}
 	}
-	if (options[6]) {
+	if (options[7]) {
 		apple.x = 500 << 8;
 		apple.y = 500 << 8;
 	}
@@ -1043,8 +1045,42 @@ static void sceneInit(void) {
 
 
 }
+static void reversePath(int n) {
+	Path temp;
+	int start = pathPos[n];
+	int end = currentPath[n];
+    while (abs(start - end) > 1)
+    {
+        temp = path[start][n];   
+        path[start][n] = path[end][n];
+        path[end][n] = temp;
+        start++;
+        end--;
+        if (start > 240 * 400) start = 0;
+        if (end < 0) end = 240 * 400;
+    }
+    /*int tempPath = currentPath[n];
+    currentPath[n] = pathPos[n];
+    pathPos[n] = tempPath;*/
+    int tempPath = currentPath[n];
+    sprites[n].x = path[tempPath][n].x;
+    sprites[n].y = path[tempPath][n].y;
+    int speed = abs(sprites[n].dx);
+    if (sprites[n].dy) speed = abs(sprites[n].dy);
+    tempPath--;
+    if (tempPath < 0) tempPath = 240*400;
+    sprites[n].dx = 0;
+    sprites[n].dy = 0;
+    if (path[tempPath][n].x == path[currentPath[n]][n].x) {
+    	if (path[tempPath][n].y > path[currentPath[n]][n].y) sprites[n].dy = speed * -1;
+    	else sprites[n].dy = speed;
+    } else {
+    	if (path[tempPath][n].x > path[currentPath[n]][n].x) sprites[n].dx = speed * -1;
+    	else sprites[n].dx = speed;
+    }
+}
 static void printScore() {
-	if (!options[6]) {
+	if (!options[7]) {
 		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[0;0HScore: ");
 		char scores[12];
 		for (int i = 0; i < num_bikes; i++) {
@@ -1089,7 +1125,11 @@ static void printScore() {
 		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[4;0HPress %s%s to teleport the apple once.",GREEN,WHITE);
 		myprintf(mystring);
 	}
+	if (options[6]) {
+		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[5;0HPress  to go in reverse."); myprintf(mystring);
+	}
 	int x = 5;
+	if (options[6]) x = 6;
 	for (int i = actual_bikes; i < num_bikes; i++) {
 		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s has joined the game.",x + i - actual_bikes,textColors[i],sprites[i].username,WHITE);
 		myprintf(mystring);
@@ -2277,6 +2317,15 @@ void uds_test()
 			px *= 400.0f;
 			py *= 240.0f;
 
+			if (options[6] && !sprites[myNum].dead && sprites[myNum].speed == 45 && kDown & KEY_R) {
+				reversePath(myNum);
+				if (sprites[myNum].forwards) sprites[myNum].forwards = false;
+				else sprites[myNum].forwards = true;
+				msg.sprite = sprites[myNum];
+				lastSprite = svcGetSystemTick();
+				memset(replySprite,0,sizeof(replySprite[0]) * 10);
+				UDSSend(msg);
+			}
 			//Read the CirclePad position
 			if (kDown & KEY_START) {
 				replay = false;
@@ -2438,7 +2487,7 @@ void uds_test()
 					C3D_FrameDrawOn(target);
 					C3D_TexBind(0, &spritesheet_tex);
 					C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
-					if (!options[5] && !options[6]) if (kDown & KEY_Y && !usedSpecial) {
+					if (!options[5] && !options[7]) if (kDown & KEY_Y && !usedSpecial) {
 						usedSpecial = true;
 						memset(replyChange,0,sizeof(replyChange[0]) * 10);
 						changeApple();
@@ -2546,7 +2595,7 @@ void uds_test()
 							}
 							if (msg.sender == msg.sprite.image) UDSDirect(msg.sprite.node,msg);
 							int img = msg.sprite.image;
-							if (msg.sprite.image < actual_bikes && msg.sender == msg.sprite.image) {
+							if (sprites[img].forwards == msg.sprite.forwards) if (msg.sprite.image < actual_bikes && msg.sender == msg.sprite.image) {
 								
 								if (abs(currentPath[img] - pathPos[img]) > 4) {
 									u32 pathx = path[currentPath[img]][img].x >> 8;
@@ -2561,10 +2610,15 @@ void uds_test()
 									else finishLine(currentPath[img],pathx << 8, pathy << 8, imgx << 8, imgy << 8, msg.sprite, img);
 								}
 							}
-							if (msg.sender == msg.sprite.image) sprites[msg.sprite.image] = msg.sprite;
+							if (msg.sender == msg.sprite.image) {
+								if (msg.sprite.forwards != sprites[msg.sprite.image].forwards) {
+									reversePath(msg.sprite.image);
+								}
+								sprites[msg.sprite.image] = msg.sprite;
+							}
 							//drawSprite(sprites[img].x >> 8, sprites[img].y >> 8, 2, 2, img);
 							if (everyoneElseIsDead()) {
-								if (options[6] && !sprites[myNum].dead) {
+								if (options[7] && !sprites[myNum].dead) {
 									lastDead = myNum;
 									sprites[myNum].dead = true;
 									msg.sprite = sprites[myNum];
@@ -2587,7 +2641,7 @@ void uds_test()
 			}
 			keepConsole();
 			if (everyoneElseIsDead()) {
-				if (options[6] && !sprites[myNum].dead) {
+				if (options[7] && !sprites[myNum].dead) {
 					lastDead = myNum;
 					sprites[myNum].dead = true;
 					msg.sprite = sprites[myNum];
@@ -2628,7 +2682,7 @@ void uds_test()
 				lastSprite = svcGetSystemTick();
 				UDSResend(replySprite,msg);
 			} //Be sure to still resend my death msg if someone hasn't gotten it
-			if (!options[6]) {
+			if (!options[7]) {
 				if (itsATie()) myprintf("\x1b[0;0HIt's a TIE!");
 				else if (getHighestScore() == myNum) myprintf("\x1b[0;0HA winner is YOU!");
 				else { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[getHighestScore()],sprites[getHighestScore()].username,WHITE); myprintf(mystring); }
@@ -3105,7 +3159,7 @@ int main(int argc, char **argv) {
 		udsExit();
 	}
 	if (!CATASTROPHIC_FAILURE) {
-		if (debugging) myprintf("You were successfully were removed from the game.");
+		if (debugging) myprintf("You were successfully removed from the game.");
 		if (debugging) {
 			while (aptMainLoop()) {
 				keepConsole();
