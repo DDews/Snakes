@@ -9,6 +9,9 @@
 #include <3ds.h>
 #include <citro3d.h>
 
+#include <sys/dirent.h>
+#include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -241,6 +244,9 @@ int optionsToInt() {
     }
     return ret;
 }
+static void clearString() {
+	memset(mystring,'\0',sizeof(mystring));
+}
 setOptions(unsigned int n) {
 	for (unsigned int i = 0; i != numOptions; ++i)
 	{
@@ -248,6 +254,7 @@ setOptions(unsigned int n) {
 	  n /= 2;
 	}
 }
+
 static void screen_get_string_size_internal(float* width, float* height, const char* text, float scaleX, float scaleY, bool oneLine, bool wrap, float wrapX) {
     float w = 0;
     float h = 0;
@@ -473,6 +480,107 @@ myprintf(const char *format, ...) {
 	if (consolei < 15) consolei += 1;
 	return;
 }
+void util_free_path_utf8(FS_Path* path) {
+    free((void*) path->data);
+    free(path);
+}
+FS_Path* util_make_path_utf8(const char* path) {
+    size_t len = strlen(path);
+
+    u16* utf16 = (u16*) calloc(len + 1, sizeof(u16));
+    if(utf16 == NULL) {
+        return NULL;
+    }
+
+    ssize_t utf16Len = utf8_to_utf16(utf16, (const uint8_t*) path, len);
+
+    FS_Path* fsPath = (FS_Path*) calloc(1, sizeof(FS_Path));
+    if(fsPath == NULL) {
+        free(utf16);
+        return NULL;
+    }
+
+    fsPath->type = PATH_UTF16;
+    fsPath->size = (utf16Len + 1) * sizeof(u16);
+    fsPath->data = utf16;
+
+    return fsPath;
+}
+Result importUsername() {
+	char pathBuf[64];
+	snprintf(pathBuf, 64, "/snakes.dat");
+
+	Result res = 0;
+
+	FS_Path* fsPath = util_make_path_utf8(pathBuf);
+	if(fsPath != NULL) {
+	    char name[50];
+
+	    Handle fileHandle = 0;
+	    if(R_SUCCEEDED(res = FSUSER_OpenFileDirectly(&fileHandle, ARCHIVE_SDMC, fsMakePath(PATH_EMPTY, ""), *fsPath, FS_OPEN_READ, 0))) {
+	        u32 bytesRead = 0;
+	        res = FSFILE_Read(fileHandle, &bytesRead, 0, name, sizeof(name));
+	        clearString();
+	        /*snprintf(mystring,sizeof(mystring),"size: %d",bytesRead);
+	        myprintf(mystring);*/
+	        memset(overwriteName,name,sizeof(overwriteName));
+	        FSFILE_Close(fileHandle);
+	    }
+
+	    util_free_path_utf8(fsPath);
+
+	    if(R_SUCCEEDED(res)) {
+	    	clearString();
+	    	snprintf(mystring,sizeof(mystring),"Welcome, %s",name);
+	    	myprintf(mystring);
+	    } else {
+	    	//myprintf("Creating save file...");
+	    	FILE *fp;
+	    	fp = fopen("sdmc:/snakes.dat", "wb");
+	    	fclose(fp);
+	    }
+	} else {
+		//myprintf("Creating save file...");
+    	FILE *fp;
+    	fp = fopen("sdmc:/snakes.dat", "wb");
+    	fclose(fp);
+	    res = -1;
+	}
+
+	return res;
+}
+Result writeUsername() {
+	char pathBuf[64];
+	snprintf(pathBuf, 64, "/snakes.dat");
+
+	Result res = 0;
+
+	FS_Path* fsPath = util_make_path_utf8(pathBuf);
+	if(fsPath != NULL) {
+	    char name[50];
+
+	    Handle fileHandle = 0;
+	    if(R_SUCCEEDED(res = FSUSER_OpenFileDirectly(&fileHandle, ARCHIVE_SDMC, fsMakePath(PATH_EMPTY, ""), *fsPath, FS_OPEN_WRITE, 0))) {
+	        u32 bytesRead = 0;
+	        res = FSFILE_Write(fileHandle, &bytesRead, 0, overwriteName, sizeof(overwriteName), 0);
+
+	        FSFILE_Close(fileHandle);
+	    }
+
+	    util_free_path_utf8(fsPath);
+
+	    if(R_SUCCEEDED(res)) {
+	        if (debugging) myprintf("Successfully saved usename.");
+	    } else {
+	    	if (debugging) myprintf("Couldn't write to file.");
+	    }
+	} else {
+		if (debugging) myprintf("Something went wrong saving username.");
+	    res = -1;
+	}
+
+	return res;
+}
 keepSConsole() {
 	keepXConsole();
 }
@@ -668,7 +776,7 @@ static void UDSResend(bool replied[], Message msg) {
 	{
 		if (debugging) {
 			char replies[10];
-			memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"replies: ");
+			clearString(); snprintf(mystring,sizeof(mystring),"replies: ");
 			for (int i = 0; i < num_bikes; i++) {
 				if (i == myNum) snprintf(replies,sizeof(replies),"-");
 				else snprintf(replies,sizeof(replies),"%d",replied[i]);
@@ -678,11 +786,11 @@ static void UDSResend(bool replied[], Message msg) {
 		}
 		for (int i = 0; i < num_bikes; i++) {
 			if (!replied[i] && i != myNum && sprites[i].node) {
-				if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"resending to... %d: %d",i,sprites[i].node); myprintf(mystring); }
+				if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"resending to... %d: %d",i,sprites[i].node); myprintf(mystring); }
 				ret = udsSendTo(sprites[i].node, 1, UDS_SENDFLAG_Default, &msg, sizeof(msg));
 				if (UDS_CHECK_SENDTO_FATALERROR(ret))
 				{
-					if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Error: UDSResend() returned 0x%08x.",(unsigned int)ret); myprintf(mystring); }
+					if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"Error: UDSResend() returned 0x%08x.",(unsigned int)ret); myprintf(mystring); }
 				}
 			}
 		}
@@ -1117,7 +1225,7 @@ static void reversePath(int n) {
 }
 static void printScore() {
 	if (!options[7]) {
-		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[0;0HScore: ");
+		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[0;0HScore: ");
 		char scores[12];
 		for (int i = 0; i < num_bikes; i++) {
 			snprintf(scores,sizeof(scores),"%s%d", textColors[i],score[i]);
@@ -1126,7 +1234,7 @@ static void printScore() {
 		}
 		myprintf(mystring);
 	} else {
-		memset(mystring,'\0',sizeof(mystring));
+		clearString();
 		snprintf(mystring,sizeof(mystring),"\x1b[0;0HAlive: ");
 		char living[50];
 		for (int i = 0; i < actual_bikes; i++) {
@@ -1143,34 +1251,34 @@ static void printScore() {
 	}
 	death = dead;
 	if (!death) death = dead2;
-	if (sprites[myNum].dead) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[1;0H%sYou are %sdead%s (%s%s%s)",WHITE,RED,WHITE,textColors[getKiller(death)],sprites[getKiller(death)].username,WHITE); myprintf(mystring); }
+	if (sprites[myNum].dead) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[1;0H%sYou are %sdead%s (%s%s%s)",WHITE,RED,WHITE,textColors[getKiller(death)],sprites[getKiller(death)].username,WHITE); myprintf(mystring); }
 	else { 
-		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[1;0H%sYou are %salive%s! ",WHITE,GREEN,WHITE);
+		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[1;0H%sYou are %salive%s! ",WHITE,GREEN,WHITE);
 		myprintf(mystring);
-		if (everyoneElseIsDead()) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[6;0HGet %d more points!",theHighest() - score[myNum] + 1); myprintf(mystring); }
+		if (everyoneElseIsDead()) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[6;0HGet %d more points!",theHighest() - score[myNum] + 1); myprintf(mystring); }
 	}
 	if (!options[3]) {
-		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[2;0HHold %s%s to move Faster.",RED,WHITE);
+		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[2;0HHold %s%s to move Faster.",RED,WHITE);
 		myprintf(mystring);
 	}
 	if (!options[4]) {
-		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[3;0HHold %s%s to move Slower.",YELLOW,WHITE);
+		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[3;0HHold %s%s to move Slower.",YELLOW,WHITE);
 		myprintf(mystring);
 	}
 	if (!options[5]) {
-		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[4;0HPress %s%s to teleport the apple once.",GREEN,WHITE);
+		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[4;0HPress %s%s to teleport the apple once.",GREEN,WHITE);
 		myprintf(mystring);
 	}
 	if (options[6]) {
-		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[5;0HPress  to go in reverse."); myprintf(mystring);
+		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[5;0HPress  to go in reverse."); myprintf(mystring);
 	}
 	int x = 5;
 	if (options[6]) x = 6;
 	for (int i = actual_bikes; i < num_bikes; i++) {
-		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s has joined the game.",x + i - actual_bikes,textColors[i],sprites[i].username,WHITE);
+		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s has joined the game.",x + i - actual_bikes,textColors[i],sprites[i].username,WHITE);
 		myprintf(mystring);
 	}
-	if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[5;0Hactual_bikes: %d mynum: %d %d",actual_bikes, myNum, num_bikes); myprintf(mystring); }
+	if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[5;0Hactual_bikes: %d mynum: %d %d",actual_bikes, myNum, num_bikes); myprintf(mystring); }
 	//myprintf("\x1b[5;0Hdead: 0x%08x, 0x%08x",dead,dead2);
 	//myprintf("\x1b[6;0Hnum_bikes: %d, myNum: %d",num_bikes,myNum);
 	//myprintf("\x1b[7;0Hgrowth: %d length: %d (%d)",growth[myNum],sprites[myNum].length,getLength(myNum));
@@ -1297,7 +1405,7 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 				//if (pathn == currentPath[img]) currentPath[img]++;
 				if (currentPath[img] > 240 * 400) currentPath[img] = 0;
 			} else if (sprites[img].diag) {
-				if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%sYEP%s",RED,WHITE); myprintf(mystring); }
+				if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"%sYEP%s",RED,WHITE); myprintf(mystring); }
 			}
 			drawSprite(dx,dy,2,2,img);
 		}
@@ -1330,7 +1438,7 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 	if (udx == prevx && udy == prevy) {
 		if (debugging) {
 			while (c == img) c = rand() % 9;
-			memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%s%d .. %d%s",textColors[c],udx,udy,WHITE);
+			clearString(); snprintf(mystring,sizeof(mystring),"%s%d .. %d%s",textColors[c],udx,udy,WHITE);
 			myprintf(mystring);
 			drawSprite(sx >> 8,sy >> 8,2,2,c);
 			drawSprite(dx, dy, 2, 2, c);
@@ -1339,7 +1447,7 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 	}
 	if (debugging) {
 		while (c == img) c = rand() % 9;
-		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%sok.%s",textColors[c],WHITE);
+		clearString(); snprintf(mystring,sizeof(mystring),"%sok.%s",textColors[c],WHITE);
 		myprintf(mystring);
 	}
 	//drawSprite(sx,sy,2,2,c);
@@ -1394,7 +1502,7 @@ static void moveSprites() {
 	int i;
 	for(i = 0; i < num_bikes; i++) {
 		if (sprites[i].dead || !timeDiff(i)) continue;
-		if (i != myNum && sprites[i].diag) {
+		if (i != myNum && sprites[i].diag) { //auto diagonals for cpad
 			if (sprites[i].diag == NORTHEAST) {
 				if (sprites[i].dx) {
 					sprites[i].dy = sprites[i].dx * -1;
@@ -1431,19 +1539,19 @@ static void moveSprites() {
 		}
 		sprites[i].x += sprites[i].dx;
 		sprites[i].y += sprites[i].dy;
-		if(sprites[i].x < (2<<8)) sprites[i].x = (398) << 8;
+		if(sprites[i].x < (2<<8)) sprites[i].x = (398) << 8; //screen wrap
 		else if (sprites[i].x > ((398) << 8)) sprites[i].x = (2<<8);
 
-		if(sprites[i].y < (2<<8)) sprites[i].y = (238 << 8);
+		if(sprites[i].y < (2<<8)) sprites[i].y = (238 << 8); //screen wrap
 		else if (sprites[i].y > (238 << 8)) sprites[i].y = (2<<8);
 
 		frameTicks[i] = svcGetSystemTick();
-		while (getLength(i) * .9 > sprites[i].length) {
+		while (getLength(i) * .9 > sprites[i].length) { //fix length: erase
 			drawSprite(path[pathPos[i]][i].x >> 8, path[pathPos[i]][i].y >> 8, 2, 2, 9);
 			pathPos[i]++;
 		}
 		if (growth[i]) growth[i]--;
-		else if (getLength(i) >= sprites[i].length) {
+		else if (getLength(i) >= sprites[i].length) { //move tail
 			drawSprite(path[pathPos[i]][i].x >> 8, path[pathPos[i]][i].y >> 8, 2, 2, 9);
 			pathPos[i]++;
 		}
@@ -1452,7 +1560,7 @@ static void moveSprites() {
 		if (currentPath[i] > 400 * 240) currentPath[i] = 0;
 		path[currentPath[i]][i].x = sprites[i].x;
 		path[currentPath[i]][i].y = sprites[i].y;
-		if (i == myNum && !sprites[myNum].dead) {
+		if (i == myNum && !sprites[myNum].dead) { //check my snake getting apple and collisions
 			u32 color1 = getColor(sprites[i].x >> 8, sprites[i].y >> 8);
 			u32 color2 = getColor((sprites[i].x >> 8) + 1, (sprites[i].y >> 8) + 1);
 			if (svcGetSystemTick() - lastApple > TICKS_PER_MS * 15 * 6 * lagMult()) if (abs((sprites[i].x >> 8) - (apple.x >> 8)) <= 2 && abs((sprites[i].y >> 8) - (apple.y >> 8)) <= 2) {
@@ -1578,10 +1686,12 @@ void uds_test()
 	//gspWaitForVBlank();
 	//snprintf(mystring,sizeof(mystring),"\x1b[1;0H%sg %sy %sb %sm %sc %sdg %so %sp",GREEN, YELLOW, BLUE, MAGENTA, CYAN, DARKGREEN, ORANGE, PINK);
 	//myprintf(mystring);
-	memset(mystring,'\0',sizeof(mystring)); 
+	sdmcInit();
+	clearString(); 
 	snprintf(mystring,sizeof(mystring),"Version %s",VERSION);
 	myprintf(mystring);
 	myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit.");
+	importUsername();
 	bool ignoreB = false;
 	while (aptMainLoop()) {
 		hidScanInput();
@@ -1611,7 +1721,7 @@ void uds_test()
 		if (kHeld & KEY_R && kDown & KEY_X) { cheats = true; myprintf("Move the apple with touchscreen!"); snprintf(overwriteName,sizeof(overwriteName),"Cheater"); }
 		else if (kDown & KEY_X) qrcode = true;
 		else if (kDown & KEY_Y) {
-			if (strstr(overwriteName,"Cheater") == NULL) {
+			if (!cheats) {
 				static SwkbdState swkbd;
 				static char mybuf[50];
 				static SwkbdStatusData swkbdStatus;
@@ -1644,9 +1754,14 @@ void uds_test()
 				if (button != SWKBD_BUTTON_NONE && strlen(mybuf) > 0) { 
 					memset(overwriteName,'\0',sizeof(overwriteName));
 					strncpy(overwriteName,mybuf,sizeof(overwriteName));
-					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Welcome, %s",overwriteName);
+					clearString(); snprintf(mystring,sizeof(mystring),"Welcome, %s",overwriteName);
 					myprintf(mystring);
-				} else myprintf("Name set to default.");
+					writeUsername();
+				} else {
+					memset(overwriteName,'\0',sizeof(overwriteName));
+					myprintf("Name set to default.");
+					writeUsername();
+				}
 			} else myprintf("You can't change your name with cheats enabled!");
 		}
 		else if (!ignoreB) if((kDown & KEY_B) || (kHeld & KEY_B)) {
@@ -1689,7 +1804,7 @@ void uds_test()
 	
 					network = &networks[0];
 					keepConsole();
-					if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"network: total nodes = %u.\n", (unsigned int)network->network.total_nodes); myprintf(mystring); }
+					if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"network: total nodes = %u.\n", (unsigned int)network->network.total_nodes); myprintf(mystring); }
 
 
 					for(pos=0; pos<total_networks; pos++)
@@ -1704,15 +1819,15 @@ void uds_test()
 						ret = udsGetNodeInfoUsername(&network->nodes[0], tmpstr);
 						if(R_FAILED(ret))
 						{
-							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsGetNodeInfoUsername() returned 0x%08x.\n", (unsigned int)ret);
+							clearString(); snprintf(mystring,sizeof(mystring),"udsGetNodeInfoUsername() returned 0x%08x.\n", (unsigned int)ret);
 							myprintf(mystring);
 							CATASTROPHIC_FAILURE = true;
 							free(networks);
 							return;
 						}
 
-						if (pos == selected) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s\n", (unsigned int)(pos + 1), YELLOW, tmpstr, WHITE); myprintf(mystring); }
-						else { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s",(unsigned int)(pos + 1),tmpstr); myprintf(mystring); }
+						if (pos == selected) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s\n", (unsigned int)(pos + 1), YELLOW, tmpstr, WHITE); myprintf(mystring); }
+						else { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s",(unsigned int)(pos + 1),tmpstr); myprintf(mystring); }
 					}
 					hidScanInput();
 					kDown = hidKeysDown();
@@ -1724,7 +1839,7 @@ void uds_test()
 			}
 			myconsoleClear();
 			if (readyToJoin) break;
-			else { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Version %s",VERSION);myprintf(mystring);	myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit."); }
+			else { clearString(); snprintf(mystring,sizeof(mystring),"Version %s",VERSION);myprintf(mystring);	myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit."); }
 		}
 		if (kUp & KEY_B) ignoreB = false;
 
@@ -1734,7 +1849,7 @@ void uds_test()
 		free(tmpbuf);
 		tmpbuf = NULL;
 
-		if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"network: total nodes = %u.\n", (unsigned int)network->network.total_nodes); myprintf(mystring); }
+		if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"network: total nodes = %u.\n", (unsigned int)network->network.total_nodes); myprintf(mystring); }
 
 
 		for(pos=0; pos<NUM_SPRITES; pos++)
@@ -1746,14 +1861,14 @@ void uds_test()
 			ret = udsGetNodeInfoUsername(&network->nodes[pos], tmpstr);
 			if(R_FAILED(ret))
 			{
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsGetNodeInfoUsername() returned 0x%08x.\n", (unsigned int)ret);
+				clearString(); snprintf(mystring,sizeof(mystring),"udsGetNodeInfoUsername() returned 0x%08x.\n", (unsigned int)ret);
 				myprintf(mystring);
 				CATASTROPHIC_FAILURE = true;
 				free(networks);
 				return;
 			}
 
-			if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"node%u username: %s\n", (unsigned int)pos, tmpstr); myprintf(mystring); }
+			if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"node%u username: %s\n", (unsigned int)pos, tmpstr); myprintf(mystring); }
 		}
 
 		for(pos=0; pos<10; pos++)
@@ -1761,7 +1876,7 @@ void uds_test()
 			ret = udsConnectNetwork(&network->network, passphrase, strlen(passphrase)+1, &bindctx, UDS_BROADCAST_NETWORKNODEID, conntype, data_channel, recv_buffer_size);
 			if(R_FAILED(ret))
 			{
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsConnectNetwork() returned 0x%08x.\n", (unsigned int)ret);
+				clearString(); snprintf(mystring,sizeof(mystring),"udsConnectNetwork() returned 0x%08x.\n", (unsigned int)ret);
 				myprintf(mystring);
 				CATASTROPHIC_FAILURE = true;
 				return;
@@ -1781,7 +1896,7 @@ void uds_test()
 
 		tmp = 0;
 		ret = udsGetChannel((u8*)&tmp);//Normally you don't need to use this.
-		if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsGetChannel() returned 0x%08x. channel = %u.\n", (unsigned int)ret, (unsigned int)tmp); myprintf(mystring); }
+		if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"udsGetChannel() returned 0x%08x. channel = %u.\n", (unsigned int)ret, (unsigned int)tmp); myprintf(mystring); }
 		if(R_FAILED(ret))
 		{
 			CATASTROPHIC_FAILURE = true;
@@ -1799,7 +1914,7 @@ void uds_test()
 			ret = udsCreateNetwork(&networkstruct, passphrase, strlen(passphrase)+1, &bindctx, data_channel, recv_buffer_size);
 			if(R_FAILED(ret))
 			{
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsCreateNetwork() returned 0x%08x.\n", (unsigned int)ret);
+				clearString(); snprintf(mystring,sizeof(mystring),"udsCreateNetwork() returned 0x%08x.\n", (unsigned int)ret);
 				myprintf(mystring);
 				CATASTROPHIC_FAILURE = true;
 				return;
@@ -1807,7 +1922,7 @@ void uds_test()
 
 			tmp = 0;
 			ret = udsGetChannel((u8*)&tmp);//Normally you don't need to use this.
-			if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsGetChannel() returned 0x%08x. channel = %u.\n", (unsigned int)ret, (unsigned int)tmp); myprintf(mystring); }
+			if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"udsGetChannel() returned 0x%08x. channel = %u.\n", (unsigned int)ret, (unsigned int)tmp); myprintf(mystring); }
 			if(R_FAILED(ret))
 			{
 				udsDestroyNetwork();
@@ -1850,7 +1965,7 @@ void uds_test()
 		ret = udsGetConnectionStatus(&constatus);
 		if(R_FAILED(ret))
 		{
-			memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsGetConnectionStatus() returned 0x%08x.", (unsigned int)ret);
+			clearString(); snprintf(mystring,sizeof(mystring),"udsGetConnectionStatus() returned 0x%08x.", (unsigned int)ret);
 			myprintf(mystring);
 			CATASTROPHIC_FAILURE = true;
 			return;
@@ -1858,20 +1973,20 @@ void uds_test()
 		else
 		{
 			if (debugging) {
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"constatus:\nstatus=0x%x\n", (unsigned int)constatus.status);
+				clearString(); snprintf(mystring,sizeof(mystring),"constatus:\nstatus=0x%x\n", (unsigned int)constatus.status);
 				myprintf(mystring);
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"1=0x%x\n", (unsigned int)constatus.unk_x4);
+				clearString(); snprintf(mystring,sizeof(mystring),"1=0x%x\n", (unsigned int)constatus.unk_x4);
 				myprintf(mystring);
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"cur_NetworkNodeID=0x%x\n", (unsigned int)constatus.cur_NetworkNodeID);
+				clearString(); snprintf(mystring,sizeof(mystring),"cur_NetworkNodeID=0x%x\n", (unsigned int)constatus.cur_NetworkNodeID);
 				myprintf(mystring);
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"unk_xa=0x%x\n", (unsigned int)constatus.unk_xa);
+				clearString(); snprintf(mystring,sizeof(mystring),"unk_xa=0x%x\n", (unsigned int)constatus.unk_xa);
 				myprintf(mystring);
-				for(pos=0; pos<(0x20>>2); pos++) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); } 
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\ntotal_nodes=0x%x\n", (unsigned int)constatus.total_nodes);
+				for(pos=0; pos<(0x20>>2); pos++) { clearString(); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); } 
+				clearString(); snprintf(mystring,sizeof(mystring),"\ntotal_nodes=0x%x\n", (unsigned int)constatus.total_nodes);
 				myprintf(mystring);
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"max_nodes=0x%x\n", (unsigned int)constatus.max_nodes);
+				clearString(); snprintf(mystring,sizeof(mystring),"max_nodes=0x%x\n", (unsigned int)constatus.max_nodes);
 				myprintf(mystring);
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"node_bitmask=0x%x\n", (unsigned int)constatus.total_nodes);
+				clearString(); snprintf(mystring,sizeof(mystring),"node_bitmask=0x%x\n", (unsigned int)constatus.total_nodes);
 				myprintf(mystring);
 			}
 			myNode = constatus.cur_NetworkNodeID;
@@ -1915,7 +2030,7 @@ void uds_test()
 					if (uds_enabled) ret = udsPullPacket(&bindctx, tmpbuf, tmpbuf_size, &actual_size, &src_NetworkNodeID);
 					if(R_FAILED(ret))
 					{
-						memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.", (unsigned int)ret);
+						clearString(); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.", (unsigned int)ret);
 						myprintf(mystring);
 						replay = false;
 						CATASTROPHIC_FAILURE = true;
@@ -1924,7 +2039,7 @@ void uds_test()
 					if(actual_size >= sizeof(Message))//If no data frame is available, udsPullPacket() will return actual_size=0.
 					{
 						memcpy(&msg,tmpbuf,sizeof(Message));
-						if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"speed: %d image: %d myNum: %d\n",msg.sprite.speed, msg.sprite.image, myNum); myprintf(mystring); }
+						if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"speed: %d image: %d myNum: %d\n",msg.sprite.speed, msg.sprite.image, myNum); myprintf(mystring); }
 						if(msg.sprite.speed == 1001 && msg.sprite.image == myNum) { inGame = true; sprites[myNum] = msg.sprite; sprites[myNum].node = myNode; msg.sprite = sprites[myNum]; for (int i = 0; i < num_bikes; i++) sprites[i].dead = true; memset(replySprite,0,sizeof(replySprite[0]) * 10); break; } //joined game in score screen
 						else if(msg.sprite.speed == 1011) { inGame = true; actual_bikes = msg.sprite.image; sprites[myNum] = msg.sprite; sprites[myNum].image = myNum; sprites[myNum].dead = true; sprites[myNum].node = myNode; sprites[myNum].speed = 45; msg.sprite = sprites[myNum]; memset(replySprite,0,sizeof(replySprite[0]) * 10); break; } // joined game in progress
 						else if(msg.sprite.speed == 1211 && msg.sprite.image == myNum) break;
@@ -1986,23 +2101,23 @@ void uds_test()
 						udsGetNodeInfoUsername(&tmpnode,&sprites[num_bikes].username);
 						sprites[num_bikes].node = constatus.total_nodes;
 						if (debugging) {
-							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"constatus:\nstatus=0x%x\n", (unsigned int)constatus.status);
+							clearString(); snprintf(mystring,sizeof(mystring),"constatus:\nstatus=0x%x\n", (unsigned int)constatus.status);
 							myprintf(mystring);
-							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"1=0x%x\n", (unsigned int)constatus.unk_x4);
+							clearString(); snprintf(mystring,sizeof(mystring),"1=0x%x\n", (unsigned int)constatus.unk_x4);
 							myprintf(mystring);
-							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"cur_NetworkNodeID=0x%x\n", (unsigned int)constatus.cur_NetworkNodeID);
+							clearString(); snprintf(mystring,sizeof(mystring),"cur_NetworkNodeID=0x%x\n", (unsigned int)constatus.cur_NetworkNodeID);
 							myprintf(mystring);
-							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"unk_xa=0x%x\n", (unsigned int)constatus.unk_xa);
+							clearString(); snprintf(mystring,sizeof(mystring),"unk_xa=0x%x\n", (unsigned int)constatus.unk_xa);
 							myprintf(mystring);
-							for(pos=0; pos<(0x20>>2); pos++) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); }
-							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\ntotal_nodes=0x%x\n", (unsigned int)constatus.total_nodes);
+							for(pos=0; pos<(0x20>>2); pos++) { clearString(); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); }
+							clearString(); snprintf(mystring,sizeof(mystring),"\ntotal_nodes=0x%x\n", (unsigned int)constatus.total_nodes);
 							myprintf(mystring);
-							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"max_nodes=0x%x\n", (unsigned int)constatus.max_nodes);
+							clearString(); snprintf(mystring,sizeof(mystring),"max_nodes=0x%x\n", (unsigned int)constatus.max_nodes);
 							myprintf(mystring);
-							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"node_bitmask=0x%x\n", (unsigned int)constatus.total_nodes);
+							clearString(); snprintf(mystring,sizeof(mystring),"node_bitmask=0x%x\n", (unsigned int)constatus.total_nodes);
 							myprintf(mystring);
 						}
-						memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%s%s has joined as %s%s\n",textColors[num_bikes],sprites[num_bikes].username,colorNames[num_bikes],WHITE);
+						clearString(); snprintf(mystring,sizeof(mystring),"%s%s has joined as %s%s\n",textColors[num_bikes],sprites[num_bikes].username,colorNames[num_bikes],WHITE);
 						myprintf(mystring);
 						num_bikes = constatus.total_nodes;
 					}
@@ -2051,7 +2166,7 @@ void uds_test()
 						ret = udsGetConnectionStatus(&constatus);
 						if(R_FAILED(ret))
 						{
-							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsGetConnectionStatus() returned 0x%08x.\n", (unsigned int)ret);
+							clearString(); snprintf(mystring,sizeof(mystring),"udsGetConnectionStatus() returned 0x%08x.\n", (unsigned int)ret);
 							myprintf(mystring);
 							CATASTROPHIC_FAILURE = true;
 							return;
@@ -2060,21 +2175,28 @@ void uds_test()
 						{
 							if (constatus.total_nodes >= num_bikes) {
 								if (debugging) {
-									myprintf("constatus:\nstatus=0x%x\n", (unsigned int)constatus.status);
-									myprintf("1=0x%x\n", (unsigned int)constatus.unk_x4);
-									myprintf("cur_NetworkNodeID=0x%x\n", (unsigned int)constatus.cur_NetworkNodeID);
-									myprintf("unk_xa=0x%x\n", (unsigned int)constatus.unk_xa);
-									for(pos=0; pos<(0x20>>2); pos++)myprintf("%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]);
-									myprintf("\ntotal_nodes=0x%x\n", (unsigned int)constatus.total_nodes);
-									myprintf("max_nodes=0x%x\n", (unsigned int)constatus.max_nodes);
-									myprintf("node_bitmask=0x%x\n", (unsigned int)constatus.total_nodes);
+									clearString(); snprintf(mystring,sizeof(mystring),"constatus:\nstatus=0x%x\n", (unsigned int)constatus.status);
+									myprintf(mystring);
+									clearString(); snprintf(mystring,sizeof(mystring),"1=0x%x\n", (unsigned int)constatus.unk_x4);
+									myprintf(mystring);
+									clearString(); snprintf(mystring,sizeof(mystring),"cur_NetworkNodeID=0x%x\n", (unsigned int)constatus.cur_NetworkNodeID);
+									myprintf(mystring);
+									clearString(); snprintf(mystring,sizeof(mystring),"unk_xa=0x%x\n", (unsigned int)constatus.unk_xa);
+									myprintf(mystring);
+									for(pos=0; pos<(0x20>>2); pos++) { clearString(); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); }
+									clearString(); snprintf(mystring,sizeof(mystring),"\ntotal_nodes=0x%x\n", (unsigned int)constatus.total_nodes);
+									myprintf(mystring);
+									clearString(); snprintf(mystring,sizeof(mystring),"max_nodes=0x%x\n", (unsigned int)constatus.max_nodes);
+									myprintf(mystring);
+									clearString(); snprintf(mystring,sizeof(mystring),"node_bitmask=0x%x\n", (unsigned int)constatus.total_nodes);
+									myprintf(mystring);
 								}
 								ret = udsGetNodeInformation(constatus.total_nodes,&tmpnode);
 								if (constatus.total_nodes >= num_bikes) {
 									memset(sprites[num_bikes].username,'\0',sizeof(sprites[num_bikes].username));
 									udsGetNodeInfoUsername(&tmpnode,&sprites[num_bikes].username);
 									if (!sprites[num_bikes].node) sprites[num_bikes].node = constatus.total_nodes;
-									memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%s%s has joined as %s%s\n",textColors[num_bikes],sprites[num_bikes].username,colorNames[num_bikes],WHITE);
+									clearString(); snprintf(mystring,sizeof(mystring),"%s%s has joined as %s%s\n",textColors[num_bikes],sprites[num_bikes].username,colorNames[num_bikes],WHITE);
 									myprintf(mystring);
 								}
 							} else {
@@ -2087,7 +2209,7 @@ void uds_test()
 					if (uds_enabled) ret = udsPullPacket(&bindctx, tmpbuf, tmpbuf_size, &actual_size, &src_NetworkNodeID);
 					if(R_FAILED(ret))
 					{
-						memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.\n", (unsigned int)ret);
+						clearString(); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.\n", (unsigned int)ret);
 						myprintf(mystring);
 						CATASTROPHIC_FAILURE = true;
 						return;
@@ -2095,12 +2217,12 @@ void uds_test()
 					if(actual_size >= sizeof(Message))//If no data frame is available, udsPullPacket() will return actual_size=0.
 					{
 						memcpy(&msg,tmpbuf,sizeof(Message));
-						if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"speed: %d image: %d\n",msg.sprite.speed, msg.sprite.image); myprintf(mystring); }
+						if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"speed: %d image: %d\n",msg.sprite.speed, msg.sprite.image); myprintf(mystring); }
 						if (msg.sprite.speed == 100) replySprite[msg.sender] = true;
 						else if (msg.sprite.speed == 777) {} //ignore
 						else if (msg.sprite.speed == 123) {} //ignore
 						else if (msg.sprite.speed == 66) replyChange[msg.sender] = true;
-						else if (msg.sprite.speed == 1111) { if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Accepting request to join...(%d)\n",msg.sender); myprintf(mystring); } sprites[msg.sender].node = msg.sprite.node; replyChange[msg.sender] = false; replySprite[msg.sender] = false; sprites[msg.sender].speed = 1211; msg.sprite = sprites[msg.sender]; UDSSend(msg); } 
+						else if (msg.sprite.speed == 1111) { if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"Accepting request to join...(%d)\n",msg.sender); myprintf(mystring); } sprites[msg.sender].node = msg.sprite.node; replyChange[msg.sender] = false; replySprite[msg.sender] = false; sprites[msg.sender].speed = 1211; msg.sprite = sprites[msg.sender]; UDSSend(msg); } 
 						else if (msg.sprite.speed == 999) { CATASTROPHIC_FAILURE = true; return; } //player quit
 					}
 					if (allReplied(replySprite) && allReplied(replyChange)) {
@@ -2127,7 +2249,7 @@ void uds_test()
 			myconsoleClear();
 			if (debugging) myprintf("\x1b[0;0HReceiving bike information...\n");
 			myprintf("Loading...");
-			memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"You are %s%s%s!",textColors[myNum],colorNames[myNum],WHITE);
+			clearString(); snprintf(mystring,sizeof(mystring),"You are %s%s%s!",textColors[myNum],colorNames[myNum],WHITE);
 			myprintf(mystring);
 			memset(replySprite,true,sizeof(replySprite[0]) * 10);
 			lastSprite = svcGetSystemTick();
@@ -2151,7 +2273,7 @@ void uds_test()
 					ret = udsGetConnectionStatus(&constatus);
 					if(R_FAILED(ret))
 					{
-						memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsGetConnectionStatus() returned 0x%08x.\n", (unsigned int)ret);
+						clearString(); snprintf(mystring,sizeof(mystring),"udsGetConnectionStatus() returned 0x%08x.\n", (unsigned int)ret);
 						myprintf(mystring);
 						CATASTROPHIC_FAILURE = true;
 						return;
@@ -2159,14 +2281,21 @@ void uds_test()
 					else
 					{
 						if (debugging) {
-							myprintf("constatus:\nstatus=0x%x\n", (unsigned int)constatus.status);
-							myprintf("1=0x%x\n", (unsigned int)constatus.unk_x4);
-							myprintf("cur_NetworkNodeID=0x%x\n", (unsigned int)constatus.cur_NetworkNodeID);
-							myprintf("unk_xa=0x%x\n", (unsigned int)constatus.unk_xa);
-							for(pos=0; pos<(0x20>>2); pos++)myprintf("%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]);
-							myprintf("\ntotal_nodes=0x%x\n", (unsigned int)constatus.total_nodes);
-							myprintf("max_nodes=0x%x\n", (unsigned int)constatus.max_nodes);
-							myprintf("node_bitmask=0x%x\n", (unsigned int)constatus.total_nodes);
+							clearString(); snprintf(mystring,sizeof(mystring),"constatus:\nstatus=0x%x\n", (unsigned int)constatus.status);
+							myprintf(mystring);
+							clearString(); snprintf(mystring,sizeof(mystring),"1=0x%x\n", (unsigned int)constatus.unk_x4);
+							myprintf(mystring);
+							clearString(); snprintf(mystring,sizeof(mystring),"cur_NetworkNodeID=0x%x\n", (unsigned int)constatus.cur_NetworkNodeID);
+							myprintf(mystring);
+							clearString(); snprintf(mystring,sizeof(mystring),"unk_xa=0x%x\n", (unsigned int)constatus.unk_xa);
+							myprintf(mystring);
+							for(pos=0; pos<(0x20>>2); pos++) { clearString(); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); }
+							clearString(); snprintf(mystring,sizeof(mystring),"\ntotal_nodes=0x%x\n", (unsigned int)constatus.total_nodes);
+							myprintf(mystring);
+							clearString(); snprintf(mystring,sizeof(mystring),"max_nodes=0x%x\n", (unsigned int)constatus.max_nodes);
+							myprintf(mystring);
+							clearString(); snprintf(mystring,sizeof(mystring),"node_bitmask=0x%x\n", (unsigned int)constatus.total_nodes);
+							myprintf(mystring);
 						}
 						if (!hosting) {
 							myNum = constatus.cur_NetworkNodeID - 1;
@@ -2188,7 +2317,7 @@ void uds_test()
 				if (uds_enabled) ret = udsPullPacket(&bindctx, tmpbuf, tmpbuf_size, &actual_size, &src_NetworkNodeID);
 				if(R_FAILED(ret))
 				{
-					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.\n", (unsigned int)ret);
+					clearString(); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.\n", (unsigned int)ret);
 					myprintf(mystring);
 					CATASTROPHIC_FAILURE = true;
 					return;
@@ -2196,7 +2325,7 @@ void uds_test()
 				if(actual_size >= sizeof(Message))//If no data frame is available, udsPullPacket() will return actual_size=0.
 				{
 					memcpy(&msg,tmpbuf,sizeof(Message));
-					if (debugging) if (msg.sprite.speed != oldspeed) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"image: %d speed: %d myNum: %d myNode: %d\n",msg.sprite.image, msg.sprite.speed, myNum, myNode); myprintf(mystring); }
+					if (debugging) if (msg.sprite.speed != oldspeed) { clearString(); snprintf(mystring,sizeof(mystring),"image: %d speed: %d myNum: %d myNode: %d\n",msg.sprite.image, msg.sprite.speed, myNum, myNode); myprintf(mystring); }
 					oldspeed = msg.sprite.speed;
 					
 					if (msg.sprite.speed == 123) {} //ignore
@@ -2298,7 +2427,7 @@ void uds_test()
 					}
 				}
 			}
-			if (!wakeup) {
+			if (!wakeup) { //wakeup is true when everyone has started the round
 				if (!allReplied(replyScore) && svcGetSystemTick() - lastScore > TICKS_PER_MS * 15 * 6 * lagMult()) {
 					msg.sprite = sprites[myNum];
 					msg.sprite.image = myNum;
@@ -2330,7 +2459,7 @@ void uds_test()
 						UDSResend(replySprite,msg);
 					}
 				}
-			} else {
+			} else { //not everyone has started the round yet.
 				if (!allReplied(replySprite) && svcGetSystemTick() -  lastSprite > TICKS_PER_MS * 15 * 6 * lagMult()) {
 					msg.sprite = sprites[myNum];
 					msg.sprite.speed = 101;
@@ -2363,7 +2492,7 @@ void uds_test()
 				return; // break in order to return to hbmenu
 			}
 			u32 msgtype = NULL;
-			if (!options[2]) {
+			if (!options[2]) { //cpad diagonals are allowed
 				if ((abs(cpos.dy) > 17 || abs(cpos.dx) > 17) && !(oldCPos.dx == 0 && oldCPos.dy == 0)){
 					float dvd = abs(cpos.dy) > abs(cpos.dx) ? abs(cpos.dy) : abs(cpos.dx) / abs(abs(cpos.dy) - abs(cpos.dx));
 					if (dvd < 120 && dvd > 1) {
@@ -2409,17 +2538,17 @@ void uds_test()
 			}
 			oldCPos = cpos;
 			//if (debugging) myprintf("cpad: %03d %03d %d %f\n",pos.dx,pos.dy, oldMove, dvd);
-			if (!options[3]) {
+			if (!options[3]) { //A is enabled
 				if (kDown & KEY_A || kHeld & KEY_A) sprites[myNum].speed = 15;
 				else if (kUp & KEY_A) sprites[myNum].speed = 45;
 			}
-			if (!options[4]) {
+			if (!options[4]) { //B is enabled
 				if (kDown & KEY_B || kHeld & KEY_B) sprites[myNum].speed = 90;
 				else if (kUp & KEY_B) sprites[myNum].speed = 45;
 			}
 			int prevn = currentPath[myNum] - 1;
 			if (prevn < 0) prevn = 240 * 400;
-			if ((kDown & KEY_CPAD_UP || kDown & KEY_DUP || nextMove == MOVE_UP) && !sprites[myNum].dy) {
+			if ((kDown & KEY_CPAD_UP || kDown & KEY_DUP || nextMove == MOVE_UP) && !sprites[myNum].dy) { //they want to move up
 				if (kDown & KEY_DUP) sprites[myNum].diag = 0;
 				if (path[prevn][myNum].x == sprites[myNum].x) nextMove = MOVE_UP;
 				else {
@@ -2428,7 +2557,7 @@ void uds_test()
 					msgtype = MOVE_UP;
 					nextMove = NULL;
 				}
-			} else if((kDown & KEY_CPAD_DOWN || kDown & KEY_DDOWN || nextMove == MOVE_DOWN)  && !sprites[myNum].dy) {
+			} else if((kDown & KEY_CPAD_DOWN || kDown & KEY_DDOWN || nextMove == MOVE_DOWN)  && !sprites[myNum].dy) { //they want to move down
 				if (kDown & KEY_DDOWN) sprites[myNum].diag = 0;
 				if (path[prevn][myNum].x == sprites[myNum].x) nextMove = MOVE_DOWN;
 				else {
@@ -2437,7 +2566,7 @@ void uds_test()
 					msgtype = MOVE_DOWN;
 					nextMove = NULL;
 				}
-			} else if ((kDown & KEY_CPAD_LEFT || kDown & KEY_DLEFT || nextMove & MOVE_LEFT)  && !sprites[myNum].dx) {
+			} else if ((kDown & KEY_CPAD_LEFT || kDown & KEY_DLEFT || nextMove & MOVE_LEFT)  && !sprites[myNum].dx) { //they want to move left
 				if (kDown & KEY_DLEFT) sprites[myNum].diag = 0;
 				if (path[prevn][myNum].y == sprites[myNum].y) nextMove = MOVE_LEFT;
 				else {
@@ -2446,7 +2575,7 @@ void uds_test()
 					msgtype = MOVE_LEFT;
 					nextMove = NULL;
 				}
-			} else if ((kDown & KEY_CPAD_RIGHT || kDown & KEY_DRIGHT || nextMove == MOVE_RIGHT)  && !sprites[myNum].dx) {
+			} else if ((kDown & KEY_CPAD_RIGHT || kDown & KEY_DRIGHT || nextMove == MOVE_RIGHT)  && !sprites[myNum].dx) { //they want to move right
 				if (kDown & KEY_DRIGHT) sprites[myNum].diag = 0;
 				if (path[prevn][myNum].y == sprites[myNum].y) nextMove = MOVE_RIGHT;
 				else {
@@ -2456,7 +2585,7 @@ void uds_test()
 					nextMove = NULL;
 				}
 			}
-			if (msgtype != NULL || oldDx != sprites[myNum].speed) {
+			if (msgtype != NULL || oldDx != sprites[myNum].speed) { //there has been some kind of change, lets send an update
 				oldMove = msgtype;
 				if (oldDiag != sprites[myNum].diag || !sprites[myNum].diag || oldDx != sprites[myNum].speed) {
 					oldDiag = sprites[myNum].diag;
@@ -2480,7 +2609,7 @@ void uds_test()
 			if (uds_enabled) ret = udsPullPacket(&bindctx, tmpbuf, tmpbuf_size, &actual_size, &src_NetworkNodeID);
 			if(R_FAILED(ret))
 			{
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.\n", (unsigned int)ret);
+				clearString(); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.\n", (unsigned int)ret);
 				myprintf(mystring);
 				CATASTROPHIC_FAILURE = true;
 				return;
@@ -2490,15 +2619,15 @@ void uds_test()
 				{
 					memcpy(&msg,tmpbuf,sizeof(Message));
 					if (msg.sprite.speed == 101) {
-						replySprite[msg.sender] = true;
+						replySprite[msg.sender] = true; //need to know if they have all joined the game.
 					}
 				}
 			}
-			for (int i = 0; i < num_bikes; i++) {
+			/*for (int i = 0; i < num_bikes; i++) {
 				if (score[i] != oldscore[i]) clearFlag = true;
 			}
 			if (sprites[myNum].dead && !olddead) clearFlag = true;
-			if (oldbikes != num_bikes) { clearFlag = true; oldbikes = num_bikes; }
+			if (oldbikes != num_bikes) { clearFlag = true; oldbikes = num_bikes; }*/
 			printScore();
 			/*if (clearFlag) {
 				//if (!debugging) myconsoleClear();
@@ -2513,11 +2642,12 @@ void uds_test()
 			//Wait for VBlank
 			//gspWaitForVBlank();
 			// Render the scene
-			if (!wakeup) {
+			if (!wakeup) { //everyone has joined the game, we can draw to the top screen now!
 				C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 					C3D_FrameDrawOn(target);
 					C3D_TexBind(0, &spritesheet_tex);
 					C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
+					//player has pressed R with it enabled
 					if (options[6] && !sprites[myNum].dead && sprites[myNum].speed == 45 && kDown & KEY_R) {
 						reversePath(myNum);
 						if (sprites[myNum].forwards) sprites[myNum].forwards = false;
@@ -2528,11 +2658,13 @@ void uds_test()
 						UDSSend(msg);
 						overwriteSprite(sprites[myNum].x >> 8, sprites[myNum].y >> 8, 2, 2, myNum);
 					}
+					//Player has pressed Y and it is not disabled
 					if (!options[5] && !options[7]) if (kDown & KEY_Y && !usedSpecial) {
 						usedSpecial = true;
 						memset(replyChange,0,sizeof(replyChange[0]) * 10);
 						changeApple();
 					}
+					//cheats are activated and player is dragging the apple
 					if (cheats && px && py) {
 						drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 9);
 						apple.x = (int)px;
@@ -2542,7 +2674,7 @@ void uds_test()
 						drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
 						oldpx = px;
 						oldpy = py;
-					} else if (oldpx && oldpy) {
+					} else if (oldpx && oldpy) { //player has dropped the apple
 						oldpx = 0;
 						oldpy = 0;
 						msg.sprite.speed = 66;
@@ -2557,11 +2689,11 @@ void uds_test()
 					{
 						//Message msg;
 						memcpy(&msg,tmpbuf,sizeof(Message));
-						if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"sender: %d image: %d speed: %d diag: %d",msg.sender,msg.sprite.image, msg.sprite.speed,msg.sprite.diag); myprintf(mystring); }
+						if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"sender: %d image: %d speed: %d diag: %d",msg.sender,msg.sprite.image, msg.sprite.speed,msg.sprite.diag); myprintf(mystring); }
 						oldspeed = msg.sprite.speed;
 						oldsender = msg.sender;
-						if (msg.sprite.speed == 101 && msg.sender == 0) { UDSSend(msg); } //ignore.
-						else if (msg.sprite.speed == 999) {
+						if (msg.sprite.speed == 101 && msg.sender == 0) { UDSSend(msg); } //host is making sure we joined the game.
+						else if (msg.sprite.speed == 999) { //death message
 							errorQuit = 0;
 							if (msg.sender == msg.sprite.node && msg.sender == msg.sprite.image) {
 								for (int i = 0; i < num_bikes; i++) {
@@ -2579,7 +2711,7 @@ void uds_test()
 								UDSDirect(msg.sprite.image,msg);
 							}
 						}
-						else if (msg.sprite.speed == 1111) {
+						else if (msg.sprite.speed == 1111) { //join message
 							sprites[msg.sprite.image] = msg.sprite;
 							if (myNum == 0 && msg.sprite.image == msg.sender) {
 								msg.sprite = sprites[msg.sprite.image];
@@ -2592,20 +2724,20 @@ void uds_test()
 							}
 						}
 						else if (msg.sprite.speed == 1011 && myNum != 0) {} // ignore
-						else if (msg.sprite.speed == 66) { 
-							if (msg.sprite.image == myNum) { if (msg.timestamp == lastChange) replyChange[msg.sender] = true; else if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"replyChange from %d: 0x%08x != 0x%08x",msg.sender,msg.timestamp,lastChange); myprintf(mystring); } }
+						else if (msg.sprite.speed == 66) { //change apple message
+							if (msg.sprite.image == myNum) { if (msg.timestamp == lastChange) replyChange[msg.sender] = true; else if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"replyChange from %d: 0x%08x != 0x%08x",msg.sender,msg.timestamp,lastChange); myprintf(mystring); } }
 							else if (msg.sender == msg.sprite.image) { UDSDirect(msg.sprite.node,msg); if (debugging) myprintf("changing apple..."); if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) updateApple(msg.sprite.x,msg.sprite.y); }
 						}
-						else if (msg.sprite.speed == 77) { 
-							if (msg.sprite.image == myNum) { if (msg.timestamp == lastScore) replyScore[msg.sender] = true;  else if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"replyScore from %d: 0x%08x != 0x%08x",msg.sender,msg.timestamp,lastScore); myprintf(mystring); } }
+						else if (msg.sprite.speed == 77) { //scored a point message
+							if (msg.sprite.image == myNum) { if (msg.timestamp == lastScore) replyScore[msg.sender] = true;  else if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"replyScore from %d: 0x%08x != 0x%08x",msg.sender,msg.timestamp,lastScore); myprintf(mystring); } }
 							else if (msg.sender == msg.sprite.image) { UDSDirect(msg.sprite.node,msg); if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) { sprites[msg.sprite.image].length = msg.sprite.length; setApple(msg.sprite.image, msg.sprite.x, msg.sprite.y); } score[msg.sprite.image] = msg.sprite.dx; }
 						}
-						else if (msg.sprite.image == myNum) { if (msg.sprite.speed == 1001) break; if (msg.timestamp == lastSprite) replySprite[msg.sender] = true;  else if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"replySprite from %d: 0x%08x != 0x%08x",msg.sender,msg.timestamp,lastSprite); myprintf(mystring);} }
+						else if (msg.sprite.image == myNum) { if (msg.sprite.speed == 1001) break; if (msg.timestamp == lastSprite) replySprite[msg.sender] = true;  else if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"replySprite from %d: 0x%08x != 0x%08x",msg.sender,msg.timestamp,lastSprite); myprintf(mystring);} }
 						else if (msg.sprite.speed == 1001) {} //ignore.
 						else {
 							
 							
-							if (msg.sprite.image > num_bikes) { 
+							if (msg.sprite.image > num_bikes) { //someone has joined and we missed it...
 								num_bikes = msg.sprite.image + 1; 
 								for (int i = actual_bikes; i < NUM_SPRITES; i++) { 
 									sprites[i].dead = true; 
@@ -2620,7 +2752,7 @@ void uds_test()
 									UDSSend(msg); 
 								} 
 							}
-							if (msg.sprite.image == num_bikes) { 
+							if (msg.sprite.image == num_bikes) { //someone has joined and we missed it
 								sprites[num_bikes].dead = true; 
 								if (allReplied(replyScore)) memset(replyScore,1,sizeof(replyScore[0]) * 10); 
 								if (allReplied(replyChange)) memset(replyChange,1,sizeof(replyChange[0]) * 10); 
@@ -2634,8 +2766,11 @@ void uds_test()
 									UDSSend(msg); 
 								} 
 							}
+							//this is someone's movement. lets update their sprite information
 							if (msg.sender == msg.sprite.image) UDSDirect(msg.sprite.node,msg);
 							int img = msg.sprite.image;
+							//they haven't gone in reverse yet.
+							//let's clean up any graphical artifacts and fill any holes from teleporting
 							if (sprites[img].forwards == msg.sprite.forwards) if (msg.sprite.image < actual_bikes && msg.sender == msg.sprite.image) {
 								
 								if (abs(currentPath[img] - pathPos[img]) > 4) {
@@ -2651,7 +2786,9 @@ void uds_test()
 									else finishLine(currentPath[img],pathx << 8, pathy << 8, imgx << 8, imgy << 8, msg.sprite, img);
 								}
 							}
+							//this is definitely a message of movement change
 							if (msg.sender == msg.sprite.image) {
+								//they sent a message showing they have gone in reverse
 								if (msg.sprite.forwards != sprites[msg.sprite.image].forwards) {
 									reversePath(msg.sprite.image);
 									int cp = currentPath[img];
@@ -2682,8 +2819,8 @@ void uds_test()
 								}
 								sprites[msg.sprite.image] = msg.sprite;
 							}
-							//drawSprite(sprites[img].x >> 8, sprites[img].y >> 8, 2, 2, img);
 							if (everyoneElseIsDead()) {
+								//if it's No apple mode...
 								if (options[7] && !sprites[myNum].dead) {
 									lastDead = myNum;
 									sprites[myNum].dead = true;
@@ -2692,10 +2829,12 @@ void uds_test()
 									lastSprite = svcGetSystemTick();
 									UDSSend(msg);
 								}
+								//or it's normal, and we have the highest score while everyone else is dead...
 								else if (getHighestScore() == myNum && allReplied(replyScore)) { lastDead = myNum; sprites[myNum].dead = true; msg.sprite = sprites[myNum]; memset(replySprite,0,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); UDSSend(msg); }
 							}
 						}
 					}
+					//redraw the apple, it has moved
 					if (oldApplex != apple.x && oldAppley != apple.y) { 
 						drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
 						oldApplex = apple.x;
@@ -2707,6 +2846,7 @@ void uds_test()
 			}
 			keepConsole();
 			if (everyoneElseIsDead()) {
+				//no apple mode
 				if (options[7] && !sprites[myNum].dead) {
 					lastDead = myNum;
 					sprites[myNum].dead = true;
@@ -2715,10 +2855,15 @@ void uds_test()
 					lastSprite = svcGetSystemTick();
 					UDSSend(msg);
 				}
+				//its normal
 				else if (getHighestScore() == myNum && allReplied(replyScore)) { lastDead = myNum; sprites[myNum].dead = true; sprites[myNum].node = myNode; msg.sprite = sprites[myNum]; memset(replySprite,0,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); UDSSend(msg); }
 			}
 			if (everyoneElseIsDead() && sprites[myNum].dead) break;
 		}
+
+		//This is the end of round screen...
+
+
 		myconsoleClear();
 		memset(replyChange,1,sizeof(replyChange[0]) * 10);
 		memset(replyScore,0,sizeof(replyScore[0]) * 10);
@@ -2734,12 +2879,16 @@ void uds_test()
 		u64 readyLock = 0;
 		readyLock = svcGetSystemTick();
 		inGame = false;
+
 		while (aptMainLoop()) {
+
 			C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target2);
 			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &textprojection);
-			myprintf("\x1b[2;0H ");
+			myprintf("\x1b[2;0H "); //clear the 3rd line in case we scroll text
 			keepSConsole();
+
+			//Be sure to still resend my death msg if someone hasn't gotten it
 			if (!allReplied(replySprite) && svcGetSystemTick() - lastSprite > TICKS_PER_MS * 15 * 6 * lagMult()) {
 				sprites[myNum].image = myNum;
 				sprites[myNum].dead = true;
@@ -2747,16 +2896,17 @@ void uds_test()
 				msg.sprite = sprites[myNum];
 				lastSprite = svcGetSystemTick();
 				UDSResend(replySprite,msg);
-			} //Be sure to still resend my death msg if someone hasn't gotten it
+			}
+			//if it's not survival mode
 			if (!options[7]) {
 				if (itsATie()) myprintf("\x1b[0;0HIt's a TIE!");
 				else if (getHighestScore() == myNum) myprintf("\x1b[0;0HA winner is YOU!");
-				else { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[getHighestScore()],sprites[getHighestScore()].username,WHITE); myprintf(mystring); }
+				else { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[getHighestScore()],sprites[getHighestScore()].username,WHITE); myprintf(mystring); }
 			} else {
 				if (myNum == lastDead) myprintf("\x1b[0;0HA winner is YOU!");
 				else { snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[lastDead],sprites[lastDead].username,WHITE); myprintf(mystring); }
 			}
-			memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[1;0HScore: ");
+			clearString(); snprintf(mystring,sizeof(mystring),"\x1b[1;0HScore: ");
 			char scores[10];
 			float widths[10];
 			float h;
@@ -2776,7 +2926,7 @@ void uds_test()
 					strcat(te,k);
 				}
 			myprintf(mystring);
-			//memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[2;0H%sScore: ", BLACK);
+			//clearString(); snprintf(mystring,sizeof(mystring),"\x1b[2;0H%sScore: ", BLACK);
 				for (int i = 0; i < NUM_SPRITES; i++) {
 					memset(scores,'\0',sizeof(scores));
 					if (i < num_bikes) {
@@ -2784,18 +2934,21 @@ void uds_test()
 						else snprintf(scores,sizeof(scores),"%s-",WHITE);
 						rText(widths[i],h * 2 + 10.0,.5f,.5f,true,scores);
 					}
-					//strcat(mystring,scores);
 				}
-			//myprintf(mystring);
 			C3D_FrameEnd(0);
 			if (allReplied(replyScore) && myNum == 0 && num_bikes > 1) { if (debugging) myprintf("Everyone got the message. Sending bike information.."); break; }
 			if (waitForFinish != 0 && svcGetSystemTick() - waitForFinish > TICKS_PER_SEC * 4) break;
-			memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[3;0H%sPress A if you're ready!",WHITE);
+			clearString(); snprintf(mystring,sizeof(mystring),"\x1b[3;0H%sPress A if you're ready!",WHITE);
 			myprintf(mystring);
 			myprintf("\x1b[4;0HPress START to quit.");
 			if (!myNum) myprintf("\x1b[5;0HPress SELECT to set game modes!");
-			if (numLeft >= 15) { myconsoleClear(); numLeft = 0; }
-			if (num_bikes == 1) { numLeft++; num_bikes--; memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Everyone has left the game!"); myprintf(mystring); }
+
+
+
+
+			if (num_bikes == 1 && actual_bikes > 1) { numLeft++; num_bikes--; clearString(); snprintf(mystring,sizeof(mystring),"Everyone has left the game!"); myprintf(mystring); }
+			
+			//Trigger to resend dropped packet of "Ready"
 			if (!allReplied(replyChange) && svcGetSystemTick() - lastChange > TICKS_PER_MS * 15 * 30 * lagMult()) {
 				sprites[myNum].node = myNode;
 				strncpy(sprites[myNum].username,myName,sizeof(sprites[myNum].username));
@@ -2804,6 +2957,8 @@ void uds_test()
 				//memset(replyChange,0,sizeof(replyChange[0]) * 10);
 				UDSResend(replyChange,msg);
 			}
+
+			//Trigger to resend dropped packet of "Start game"
 			if (lastScore && !allReplied(replyScore) && svcGetSystemTick() - lastScore > TICKS_PER_MS * 15 * 30 * lagMult()) {
 				sprites[myNum].node = myNode;
 				strncpy(sprites[myNum].username,myName,sizeof(sprites[myNum].username));
@@ -2812,6 +2967,8 @@ void uds_test()
 				UDSResend(replyScore,msg);
 				lastScore = svcGetSystemTick();
 			}
+
+
 			hidScanInput();
 			u32 kDown = hidKeysDown();
 			memset(tmpbuf, 0, tmpbuf_size);
@@ -2820,7 +2977,7 @@ void uds_test()
 			if (uds_enabled) ret = udsPullPacket(&bindctx, tmpbuf, tmpbuf_size, &actual_size, &src_NetworkNodeID);
 			if(R_FAILED(ret))
 			{
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.", (unsigned int)ret);
+				clearString(); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.", (unsigned int)ret);
 				myprintf(mystring);
 				CATASTROPHIC_FAILURE = true;
 				replay = false;
@@ -2832,10 +2989,10 @@ void uds_test()
 				memcpy(&msg,tmpbuf,sizeof(Message));
 				if (debugging) {
 					numLeft++;
-					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"sender: %d, image: %d, speed: %d node: %d, %d",msg.sender,msg.sprite.image,msg.sprite.speed, msg.sprite.node);
+					clearString(); snprintf(mystring,sizeof(mystring),"sender: %d, image: %d, speed: %d node: %d, %d",msg.sender,msg.sprite.image,msg.sprite.speed, msg.sprite.node);
 					myprintf(mystring);
 				}
-				if (msg.sprite.speed == 999) {
+				if (msg.sprite.speed == 999) { //death message
 					if (msg.sender == msg.sprite.node && msg.sprite.image == msg.sprite.node) {
 						memset(quitName,'\0',sizeof(quitName));
 						strncpy(quitName,msg.sprite.username,sizeof(quitName));
@@ -2858,10 +3015,10 @@ void uds_test()
 					}
 				} //connection killed by guest*/
 				else if (msg.sprite.speed == 1011) { } //ignore
-				else if (msg.sprite.speed == 1111) {
+				else if (msg.sprite.speed == 1111) { //join message
 					sprites[msg.sprite.image] = msg.sprite;
 					sprites[msg.sprite.image].node = msg.sprite.node;
-					if (joinedNum != msg.sprite.image) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%s%s has joined as %s%s",textColors[msg.sprite.image],msg.sprite.username,colorNames[msg.sprite.image],WHITE); myprintf(mystring); }
+					if (joinedNum != msg.sprite.image) { clearString(); snprintf(mystring,sizeof(mystring),"%s%s has joined as %s%s",textColors[msg.sprite.image],msg.sprite.username,colorNames[msg.sprite.image],WHITE); myprintf(mystring); }
 					joinedNum = msg.sprite.image;
 					if (myNum == 0) {
 						sprites[myNum].node = myNode;
@@ -2878,9 +3035,13 @@ void uds_test()
 					msg.sprite = sprites[myNum];
 					UDSSend(msg);
 				}
-				else if (msg.sprite.speed == 123 && svcGetSystemTick() - readyLock > TICKS_PER_SEC) { if (!ready[msg.sender]) { numLeft++;  memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%s%s%s is ready! Waiting on %d more...", textColors[msg.sender], msg.sprite.username, WHITE, notReadies() - 1); myprintf(mystring); } ready[msg.sender] = true; if (msg.sprite.image != myNum) { msg.sprite.image = msg.sender; msg.sprite.speed = 777; UDSSend(msg); } }
+				//ready message
+				else if (msg.sprite.speed == 123 && svcGetSystemTick() - readyLock > TICKS_PER_SEC) { if (!ready[msg.sender]) { numLeft++;  clearString(); snprintf(mystring,sizeof(mystring),"%s%s%s is ready! Waiting on %d more...", textColors[msg.sender], msg.sprite.username, WHITE, notReadies() - 1); myprintf(mystring); } ready[msg.sender] = true; if (msg.sprite.image != myNum) { msg.sprite.image = msg.sender; msg.sprite.speed = 777; UDSSend(msg); } }
+				//response to ready message
 				else if (msg.sprite.speed == 777 && svcGetSystemTick() - readyLock > TICKS_PER_SEC) {
 					if (msg.sprite.image == myNum) replyChange[msg.sender] = true;
+
+					//game start message
 				} else if(msg.sprite.speed == 555) {
 					if (msg.sender == 0) {
 						UDSSend(msg); 
@@ -2888,7 +3049,7 @@ void uds_test()
 					} else if (myNum == 0) {
 						replyScore[msg.sender] = true;
 					}
-				} else {
+				} else { //or its a sprite change
 					if (msg.sprite.image == myNum) replySprite[msg.sender] = true;
 					else if (msg.sprite.image == msg.sender) {
 						sprites[msg.sprite.image] = msg.sprite;
@@ -2897,7 +3058,7 @@ void uds_test()
 				}
 			}
 			if (allReady() && num_bikes > 1 && !lastScore) { 
-				memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"Starting game....");  
+				clearString(); snprintf(mystring,sizeof(mystring),"Starting game....");  
 				myprintf(mystring);
 				if (myNum == 0) { 
 					msg.sprite = sprites[myNum]; 
@@ -2909,11 +3070,13 @@ void uds_test()
 			}
 
 
-			if (kDown & KEY_B && debugging) { numLeft++; memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%d",numLeft + 5, (svcGetSystemTick() - waitForFinish) / TICKS_PER_SEC); myprintf(mystring); }
+
+			if (kDown & KEY_B && debugging) { numLeft++; clearString(); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%d",numLeft + 5, (svcGetSystemTick() - waitForFinish) / TICKS_PER_SEC); myprintf(mystring); }
 			if (myNum == 0 && kDown & KEY_SELECT) {
 				if (!ready[0]) { gameOptions(); myconsoleClear(); }
 				else myprintf("Can't edit modes when you are ready!");
 			}
+			//player pressed A
 			if (kDown & KEY_A && svcGetSystemTick() - readyLock > TICKS_PER_SEC) { 
 				if (num_bikes <= 1) break; 
 				if (!ready[myNum]) { 
@@ -2925,12 +3088,16 @@ void uds_test()
 					memset(replyChange,0,sizeof(replyChange[0]) * 10); 
 					UDSSend(msg); 
 					numLeft++; 
-					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%s%s%s is ready! Waiting on %d more...",textColors[myNum],sprites[myNum].username,WHITE,notReadies() - 1); 
+					clearString(); snprintf(mystring,sizeof(mystring),"%s%s%s is ready! Waiting on %d more...",textColors[myNum],sprites[myNum].username,WHITE,notReadies() - 1); 
 					myprintf(mystring);
 				} 
 				ready[myNum] = true;  
 			}
+
+			//leaving the game
 			if (kDown & KEY_START) { return; }
+
+			//someone left or joined
 			if(uds_enabled && udsWaitConnectionStatusEvent(false, false))
 			{
 				readyLock = svcGetSystemTick();
@@ -2951,7 +3118,7 @@ void uds_test()
 						numLeft++;
 						if (quit < 0) {
 							numLeft++;
-							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"A player has crashed...");
+							clearString(); snprintf(mystring,sizeof(mystring),"A player has crashed...");
 							myprintf(mystring);
 							errorQuit = svcGetSystemTick();
 							while (1) {
@@ -2967,14 +3134,14 @@ void uds_test()
 								if (errorQuit != 0 && svcGetSystemTick() - errorQuit > TICKS_PER_SEC * 4) {
 									numLeft++;
 									if (numLeft >= 15) { myconsoleClear(); numLeft = 0; }
-									memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%sError: unknown person left. Removing a color...%s",RED,WHITE);
+									clearString(); snprintf(mystring,sizeof(mystring),"%sError: unknown person left. Removing a color...%s",RED,WHITE);
 									myprintf(mystring);
 									num_bikes = constatus.total_nodes;
 									memset(replyChange,1,sizeof(replyChange[0]) * 10);
 									memset(replySprite,1,sizeof(replySprite[0]) * 10);
 									if (myNum >= num_bikes) {
 										myNum = num_bikes - 1;
-										memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  You are now %s%s%s!",textColors[myNum],colorNames[myNum],WHITE);
+										clearString(); snprintf(mystring,sizeof(mystring),"  You are now %s%s%s!",textColors[myNum],colorNames[myNum],WHITE);
 										myprintf(mystring);
 									}
 									errorQuit = 0;
@@ -2986,7 +3153,7 @@ void uds_test()
 								if (uds_enabled) ret = udsPullPacket(&bindctx, tmpbuf, tmpbuf_size, &actual_size, &src_NetworkNodeID);
 								if(R_FAILED(ret))
 								{
-									memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.", (unsigned int)ret);
+									clearString(); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.", (unsigned int)ret);
 									myprintf(mystring);
 									CATASTROPHIC_FAILURE = true;
 									replay = false;
@@ -3013,14 +3180,14 @@ void uds_test()
 										oldQuit = quit;
 										numLeft++;
 										if (numLeft + num_bikes - quit >= 15) { myconsoleClear(); numLeft = 0; }
-										memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%s%s has left the game.%s",textColors[quit],quitName,WHITE);
+										clearString(); snprintf(mystring,sizeof(mystring),"%s%s has left the game.%s",textColors[quit],quitName,WHITE);
 										myprintf(mystring);
 										if (quit > 0 && quit < num_bikes - 1) {
 											if (quit < myNum) myNum--;
 											for (int i = quit; i < num_bikes - 1; i++) {
 												numLeft++;
-												if (i == myNum) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  You are now %s%s%s!",textColors[myNum],colorNames[myNum],WHITE); }
-												else { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  %s%s%s is now %s%s%s!", textColors[i + 1], sprites[i+1].username,WHITE, textColors[i],colorNames[i],WHITE); }
+												if (i == myNum) { clearString(); snprintf(mystring,sizeof(mystring),"  You are now %s%s%s!",textColors[myNum],colorNames[myNum],WHITE); }
+												else { clearString(); snprintf(mystring,sizeof(mystring),"  %s%s%s is now %s%s%s!", textColors[i + 1], sprites[i+1].username,WHITE, textColors[i],colorNames[i],WHITE); }
 												myprintf(mystring);
 												sprites[i] = sprites[i+1];
 												sprites[i].image = i;
@@ -3039,14 +3206,14 @@ void uds_test()
 						else {
 							joinedNum = 0;
 							if (numLeft + num_bikes - quit >= 15) { myconsoleClear(); numLeft = 0; }
-							memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%s%s has left the game.%s",textColors[quit],quitName,WHITE);
+							clearString(); snprintf(mystring,sizeof(mystring),"%s%s has left the game.%s",textColors[quit],quitName,WHITE);
 							myprintf(mystring);
 							if (quit > 0 && quit < num_bikes - 1) {
 								if (quit < myNum) myNum--;
 								for (int i = quit; i < num_bikes - 1; i++) {
 									numLeft++;
-									if (i == myNum) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  You are now %s%s%s!",textColors[myNum],colorNames[myNum],WHITE); }
-									else memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"  %s%s%s is now %s%s%s!", textColors[i + 1], sprites[i+1].username,WHITE, textColors[i],colorNames[i],WHITE);
+									if (i == myNum) { clearString(); snprintf(mystring,sizeof(mystring),"  You are now %s%s%s!",textColors[myNum],colorNames[myNum],WHITE); }
+									else clearString(); snprintf(mystring,sizeof(mystring),"  %s%s%s is now %s%s%s!", textColors[i + 1], sprites[i+1].username,WHITE, textColors[i],colorNames[i],WHITE);
 									myprintf(mystring);
 									sprites[i] = sprites[i+1];
 									sprites[i].image = i;
@@ -3113,7 +3280,7 @@ int main(int argc, char **argv) {
 			myprintf("\x1b[6;0HPress A or START to play offline.");
 		}
 		else {
-			memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsInit failed: 0x%08x.\n\nPress A or START to play offline.", (unsigned int)ret);
+			clearString(); snprintf(mystring,sizeof(mystring),"udsInit failed: 0x%08x.\n\nPress A or START to play offline.", (unsigned int)ret);
 			myprintf(mystring);
 		}
 		while (1) {
@@ -3132,7 +3299,7 @@ int main(int argc, char **argv) {
 	size_t actual_size;
 	u32 kDown;
 	if (debugging) if (CATASTROPHIC_FAILURE) {
-		memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%sCATASTROPHIC_FAILURE",RED);
+		clearString(); snprintf(mystring,sizeof(mystring),"%sCATASTROPHIC_FAILURE",RED);
 		myprintf(mystring);
 		while (aptMainLoop()) {
 			keepConsole();
@@ -3183,7 +3350,7 @@ int main(int argc, char **argv) {
 				if (uds_enabled) ret = udsPullPacket(&bindctx, tmpbuf, tmpbuf_size, &actual_size, &src_NetworkNodeID);
 				if(R_FAILED(ret))
 				{
-					memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.\nYou failed to leave the game. Press start.", (unsigned int)ret);
+					clearString(); snprintf(mystring,sizeof(mystring),"udsPullPacket() returned 0x%08x.\nYou failed to leave the game. Press start.", (unsigned int)ret);
 					myprintf(mystring);
 					replay = false;
 					CATASTROPHIC_FAILURE = true;
@@ -3200,8 +3367,8 @@ int main(int argc, char **argv) {
 				if(actual_size >= sizeof(Message))//If no data frame is available, udsPullPacket() will return actual_size=0.
 				{
 					memcpy(&msg,tmpbuf,sizeof(Message));
-					if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"image: %d sender: %d node: %d speed: %d", msg.sprite.image, msg.sender, msg.sprite.node, msg.sprite.speed); myprintf(mystring); }
-					if (msg.sprite.speed == 999 && msg.sprite.image == myNode && msg.timestamp == lastSprite) { if (debugging) { memset(mystring,'\0',sizeof(mystring)); snprintf(mystring,sizeof(mystring),"%d leaving: %d",myNode,msg.sprite.node); myprintf(mystring); } replySprite[msg.sprite.node] = true; }
+					if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"image: %d sender: %d node: %d speed: %d", msg.sprite.image, msg.sender, msg.sprite.node, msg.sprite.speed); myprintf(mystring); }
+					if (msg.sprite.speed == 999 && msg.sprite.image == myNode && msg.timestamp == lastSprite) { if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"%d leaving: %d",myNode,msg.sprite.node); myprintf(mystring); } replySprite[msg.sprite.node] = true; }
 					int responded = 0;
 					for (int i = 0; i <= NUM_SPRITES; i++) {
 						if (i != myNode && replySprite[i]) responded++;
