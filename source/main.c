@@ -611,6 +611,41 @@ void drawSprite( int x, int y, int width, int height, int image ) {
 
 }
 
+void overwriteSprite( int x, int y, int width, int height, int image ) {
+//---------------------------------------------------------------------------------
+	C3D_TexEnv* env = C3D_GetTexEnv(0);
+	C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, GPU_PRIMARY_COLOR);
+    C3D_TexEnvOp(env, C3D_Both, GPU_TEVOP_RGB_SRC_COLOR, GPU_TEVOP_RGB_SRC_COLOR, GPU_TEVOP_RGB_SRC_COLOR);
+    C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
+	float left = images[image].left;
+	float right = images[image].right;
+	float top = images[image].top;
+	float bottom = images[image].bottom;
+
+	// Draw a textured quad directly
+	C3D_ImmDrawBegin(GPU_TRIANGLES);
+		C3D_ImmSendAttrib(x, y, 0.5f, 0.0f); // v0=position
+		C3D_ImmSendAttrib( left, top, 0.0f, 0.0f);
+
+		C3D_ImmSendAttrib(x+width, y+height, 0.5f, 0.0f);
+		C3D_ImmSendAttrib( right, bottom, 0.0f, 0.0f);
+
+		C3D_ImmSendAttrib(x+width, y, 0.5f, 0.0f);
+		C3D_ImmSendAttrib( right, top, 0.0f, 0.0f);
+
+		C3D_ImmSendAttrib(x, y, 0.5f, 0.0f); // v0=position
+		C3D_ImmSendAttrib( left, top, 0.0f, 0.0f);
+
+		C3D_ImmSendAttrib(x, y+height, 0.5f, 0.0f);
+		C3D_ImmSendAttrib( left, bottom, 0.0f, 0.0f);
+
+		C3D_ImmSendAttrib(x+width, y+height, 0.5f, 0.0f);
+		C3D_ImmSendAttrib( right, bottom, 0.0f, 0.0f);
+
+
+	C3D_ImmDrawEnd();
+
+}
 
 static C3D_Tex spritesheet_tex;
 static C3D_Tex qrcode_tex;
@@ -1059,6 +1094,7 @@ static void reversePath(int n) {
         if (start > 240 * 400) start = 0;
         if (end < 0) end = 240 * 400;
     }
+
     /*int tempPath = currentPath[n];
     currentPath[n] = pathPos[n];
     pathPos[n] = tempPath;*/
@@ -2321,15 +2357,6 @@ void uds_test()
 			px *= 400.0f;
 			py *= 240.0f;
 
-			if (options[6] && !sprites[myNum].dead && sprites[myNum].speed == 45 && kDown & KEY_R) {
-				reversePath(myNum);
-				if (sprites[myNum].forwards) sprites[myNum].forwards = false;
-				else sprites[myNum].forwards = true;
-				msg.sprite = sprites[myNum];
-				lastSprite = svcGetSystemTick();
-				memset(replySprite,0,sizeof(replySprite[0]) * 10);
-				UDSSend(msg);
-			}
 			//Read the CirclePad position
 			if (kDown & KEY_START) {
 				replay = false;
@@ -2491,6 +2518,16 @@ void uds_test()
 					C3D_FrameDrawOn(target);
 					C3D_TexBind(0, &spritesheet_tex);
 					C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
+					if (options[6] && !sprites[myNum].dead && sprites[myNum].speed == 45 && kDown & KEY_R) {
+						reversePath(myNum);
+						if (sprites[myNum].forwards) sprites[myNum].forwards = false;
+						else sprites[myNum].forwards = true;
+						msg.sprite = sprites[myNum];
+						lastSprite = svcGetSystemTick();
+						memset(replySprite,0,sizeof(replySprite[0]) * 10);
+						UDSSend(msg);
+						overwriteSprite(sprites[myNum].x >> 8, sprites[myNum].y >> 8, 2, 2, myNum);
+					}
 					if (!options[5] && !options[7]) if (kDown & KEY_Y && !usedSpecial) {
 						usedSpecial = true;
 						memset(replyChange,0,sizeof(replyChange[0]) * 10);
@@ -2617,6 +2654,31 @@ void uds_test()
 							if (msg.sender == msg.sprite.image) {
 								if (msg.sprite.forwards != sprites[msg.sprite.image].forwards) {
 									reversePath(msg.sprite.image);
+									int cp = currentPath[img];
+									int x = path[cp][img].x >> 8;
+									int y = path[cp][img].y >> 8;
+									int cx = 0;
+									int cy = 0;
+									if ((path[cp][img].y >> 8) == (msg.sprite.y >> 8)) {
+										if ((path[cp][img].x >> 8) < (msg.sprite.x >> 8)) cx = 2;
+										else cx = -2;
+									} else if ((path[cp][img].x >> 8) == (msg.sprite.x >> 8)) {
+										if ((path[cp][img].y >> 8) < (msg.sprite.y >> 8)) cy = 2;
+										else cy = -2;
+									}
+									int i = 0;
+									if (x == (msg.sprite.x >> 8) || y == (msg.sprite.y >> 8)) while ((path[cp][img].x >> 8) != (msg.sprite.x >> 8) || (path[cp][img].y >> 8) != (msg.sprite.y >> 8)) {
+										overwriteSprite(x, y, 2, 2, img);
+										cp++;
+										x += cx;
+										y += cy;
+										if (cp > 240 * 400) cp = 0;
+										path[cp][img].x = x << 8;
+										path[cp][img].y = y << 8;
+										i++;
+									}
+									overwriteSprite(x << 8, y << 8, 2, 2, img);
+									currentPath[img] = cp;
 								}
 								sprites[msg.sprite.image] = msg.sprite;
 							}
