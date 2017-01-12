@@ -30,9 +30,9 @@
 #include "bike_png.h"
 #include "qrcode_png.h"
 
-#define VERSION "0.1.5"
+#define VERSION "0.1.6"
 
-#define TICK "◯"
+#define TICK ""
 #define TICKS_PER_MS 268123
 #define TICKS_PER_SEC 268123480
 #define CLEAR_COLOR 0x000000FF
@@ -91,9 +91,9 @@ u64 waitForFinish = 0;
 bool uds_enabled = false;
 bool readyToStart = false;
 bool debugging = false;
-int numOptions = 8;
-bool options[8] = {false,false,false,false,false,false,false,false};
-char optionNames[8][20] = {"Boundaries kill", "Tron mode", "Disable Diagonals", "Disable A", "Disable B", "Disable Y", "Enable R", "No apple"};
+int numOptions = 9;
+bool options[9] = {false,false,false,false,false,false,false,false,false};
+char optionNames[9][50] = {"Boundaries kill", "Tron mode", "Disable Diagonals", "Disable A", "Disable B", "Disable Y", "Enable R", "No apple", "Apples double length"};
 static DVLB_s* vshader_dvlb;
 static shaderProgram_s program;
 static int uLoc_projection;
@@ -1007,7 +1007,9 @@ static void setApple(int player, int x, int y) {
 	drawSprite(oldx >> 8, oldy >> 8, 2 , 2, 9);
 	drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
 	//score[player]++;
-	growth[player] += growthRate;
+	if (options[8]) growth[player] += sprites[player].length;
+	else growth[player] += growthRate;
+
 	//sprites[player].length += growthRate;
 	usedSpecial = false;
 }
@@ -1566,8 +1568,14 @@ static void moveSprites() {
 			if (svcGetSystemTick() - lastApple > TICKS_PER_MS * 15 * 6 * lagMult()) if (abs((sprites[i].x >> 8) - (apple.x >> 8)) <= 2 && abs((sprites[i].y >> 8) - (apple.y >> 8)) <= 2) {
 				lastApple = svcGetSystemTick();
 				score[i]++;
-				growth[i] += growthRate;
-				sprites[i].length += growthRate;
+				if (options[8]) {
+					growth[i] += sprites[i].length;
+					sprites[i].length *= 2;
+				}
+				else {
+					growth[i] += growthRate;
+					sprites[i].length += growthRate;
+				}
 				memset(replyScore,0,sizeof(replyScore[0]) * 10);
 				moveApple();
 				if (debugging) myprintf("Got apple.");
@@ -1657,7 +1665,7 @@ void uds_test()
 
 	u32 recv_buffer_size = UDS_DEFAULT_RECVBUFSIZE;
 	u32 wlancommID = 0x783a9dab;//Unique ID, change this to your own.
-	char *passphrase = "dandewsudssnake.1.5 saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
+	char *passphrase = "dandewsudssnake.1.6 saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
 
 	conntype = UDSCONTYPE_Client;
 
