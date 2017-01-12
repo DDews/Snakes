@@ -52,6 +52,7 @@
 #define RED     "!.r"
 #define GREEN   "!.g"
 #define YELLOW  "!.y"
+#define DARKYELLOW  "!.j"
 #define BLUE    "!.b"
 #define MAGENTA "!.m"
 #define CYAN    "!.c"
@@ -200,6 +201,7 @@ Message sentMsg;
 u64 lastScore;
 u64 lastChange;
 u64 lastSprite;
+u64 lastDeadmsg;
 bool replyDead[10] = {0,0,0,0,0,0,0,0,0,0};
 bool replyScore[10] = {0,0,0,0,0,0,0,0,0,0};
 bool replyChange[10] = {0,0,0,0,0,0,0,0,0,0};
@@ -417,6 +419,7 @@ static void rText(float x, float y, float scaleX, float scaleY, bool baseline, c
 		else if(out[position - 1] == 'p') setTextColor(0xff827fff);
 		else if(out[position - 1] == 'w') setTextColor(0xffffffff);
 		else if(out[position - 1] == 'z') setTextColor(0xff000000);
+		else if(out[position - 1] == 'j') setTextColor(0xff008275);
 		memset(sub,'\0',sizeof(sub));
 		snprintf(sub,sizeof(sub),"%.*s",substringLength,out + position);
 		result = strstr(sub,"!.");
@@ -471,7 +474,7 @@ myprintf(const char *format, ...) {
 		} else return;
 	}
 	if (consolei >= 15) {
-		for (int i = 0; i < 14; i++) {
+		for (int i = 0; i < 15; i++) {
 			strncpy(consoleBuffer[i],consoleBuffer[i+1],sizeof(consoleBuffer[i]) - 1);
 		}
 		consolei = 15;
@@ -520,19 +523,23 @@ Result importUsername() {
 	    if(R_SUCCEEDED(res = FSUSER_OpenFileDirectly(&fileHandle, ARCHIVE_SDMC, fsMakePath(PATH_EMPTY, ""), *fsPath, FS_OPEN_READ, 0))) {
 	        u32 bytesRead = 0;
 	        res = FSFILE_Read(fileHandle, &bytesRead, 0, name, sizeof(name));
-	        clearString();
-	        /*snprintf(mystring,sizeof(mystring),"size: %d",bytesRead);
-	        myprintf(mystring);*/
-	        memset(overwriteName,name,sizeof(overwriteName));
+	        if (bytesRead > 0) {
+		        clearString();
+		        /*snprintf(mystring,sizeof(mystring),"size: %d",bytesRead);
+		        myprintf(mystring);*/
+		        snprintf(overwriteName,sizeof(overwriteName),"%s",name);
+	    	}
 	        FSFILE_Close(fileHandle);
 	    }
 
 	    util_free_path_utf8(fsPath);
 
 	    if(R_SUCCEEDED(res)) {
-	    	clearString();
-	    	snprintf(mystring,sizeof(mystring),"Welcome, %s",name);
-	    	myprintf(mystring);
+	    	if (strlen(overwriteName) > 0) {
+		    	clearString();
+		    	snprintf(mystring,sizeof(mystring),"Welcome, %s",overwriteName);
+		    	myprintf(mystring);
+	    	}
 	    } else {
 	    	//myprintf("Creating save file...");
 	    	FILE *fp;
@@ -625,6 +632,7 @@ keepXConsole() {
 				else if(out[position - 1] == 'p') setTextColor(0xff827fff);
 				else if(out[position - 1] == 'w') setTextColor(0xffffffff);
 				else if(out[position - 1] == 'z') setTextColor(0xff000000);
+				else if(out[position - 1] == 'j') setTextColor(0xff008275);
 				memset(sub,'\0',sizeof(sub));
 				snprintf(sub,sizeof(sub),"%.*s",substringLength,out + position);
 				result = strstr(sub,"!.");
@@ -2875,6 +2883,7 @@ void uds_test()
 		myconsoleClear();
 		memset(replyChange,1,sizeof(replyChange[0]) * 10);
 		memset(replyScore,0,sizeof(replyScore[0]) * 10);
+		memset(replyDead,1,sizeof(replyDead[0]) * 10);
 		lastScore = 0;
 		int oldQuit = 0;
 		int numLeft = 0;
@@ -2904,6 +2913,14 @@ void uds_test()
 				msg.sprite = sprites[myNum];
 				lastSprite = svcGetSystemTick();
 				UDSResend(replySprite,msg);
+			}
+
+			if (!allReplied(replyDead) && svcGetSystemTick() - lastDeadmsg > TICKS_PER_MS * 15 * 6 * lagMult()) {
+				msg.sprite = sprites[myNum];
+				msg.sprite.speed = 2020;
+				msg.sprite.dx = optionsToInt();
+				lastDeadmsg = svcGetSystemTick();
+				UDSResend(replyDead,msg);
 			}
 			//if it's not survival mode
 			if (!options[7]) {
@@ -3023,6 +3040,38 @@ void uds_test()
 					}
 				} //connection killed by guest*/
 				else if (msg.sprite.speed == 1011) { } //ignore
+				else if (msg.sprite.speed == 2020) {
+					if (msg.sender == 0) {
+						int n = msg.sprite.dx;
+						snprintf(mystring,sizeof(mystring),"%s%s%s was in game options...",textColors[0],sprites[0].username,WHITE);
+						myprintf(mystring);
+						bool flag = false;
+						for (unsigned int i = 0; i != numOptions; ++i)
+						{
+							if (options[i] && !(n & 1)) {
+								flag = true;
+							  	snprintf(mystring,sizeof(mystring),"    %s%s%s is now %soff%s.",DARKYELLOW,optionNames[i],WHITE,RED,WHITE);
+							  	myprintf(mystring);
+							}
+						 	n /= 2;
+						}
+						n = msg.sprite.dx;
+						for (unsigned int i = 0; i != numOptions; ++i)
+						{
+							if (!options[i] && n & 1) {
+								flag = true;
+							  	snprintf(mystring,sizeof(mystring),"    %s%s%s is now %son%s.",YELLOW,optionNames[i],WHITE,GREEN,WHITE);
+							  	myprintf(mystring);
+							}
+						 	n /= 2;
+						}
+						if (!flag) myprintf("    but nothing was changed...");
+						setOptions(msg.sprite.dx);
+						UDSSend(msg);
+					} else {
+						replyDead[msg.sender] = true;
+					}
+				}
 				else if (msg.sprite.speed == 1111) { //join message
 					sprites[msg.sprite.image] = msg.sprite;
 					sprites[msg.sprite.image].node = msg.sprite.node;
@@ -3081,7 +3130,16 @@ void uds_test()
 
 			if (kDown & KEY_B && debugging) { numLeft++; clearString(); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%d",numLeft + 5, (svcGetSystemTick() - waitForFinish) / TICKS_PER_SEC); myprintf(mystring); }
 			if (myNum == 0 && kDown & KEY_SELECT) {
-				if (!ready[0]) { gameOptions(); myconsoleClear(); }
+				if (!ready[0]) { 
+					gameOptions(); 
+					myconsoleClear(); 
+					msg.sprite = sprites[myNum];
+					msg.sprite.speed = 2020;
+					msg.sprite.dx = optionsToInt();
+					lastDeadmsg = svcGetSystemTick();
+					memset(replyDead,0,sizeof(replyDead[0]) * 10);
+					UDSSend(msg);
+				}
 				else myprintf("Can't edit modes when you are ready!");
 			}
 			//player pressed A
