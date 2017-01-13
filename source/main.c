@@ -32,7 +32,7 @@
 
 #define VERSION "0.1.7"
 
-#define TICK ""
+#define TICK ""
 #define TICKS_PER_MS 268123
 #define TICKS_PER_SEC 268123480
 #define CLEAR_COLOR 0x000000FF
@@ -61,6 +61,7 @@
 #define PINK "!.p"
 #define WHITE "!.w"
 #define BLACK "!.z"
+#define RAINBOW "!.u"
 
 // Used to transfer the final rendered display to the framebuffer
 #define DISPLAY_TRANSFER_FLAGS GX_TRANSFER_FLIP_VERT(0) | GX_TRANSFER_OUT_TILED(0) | GX_TRANSFER_RAW_COPY(0) | GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) | GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB8) | GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO)
@@ -96,6 +97,7 @@ bool debugging = false;
 int numOptions = 10;
 bool options[10] = {false,false,false,false,false,false,false,false,false,false};
 char optionNames[10][50] = {"Boundaries kill", "Tron mode", "Disable Diagonals", "Disable A", "Disable B", "Disable Y", "Enable R", "No apple", "Apples double length", "Disappear on death"};
+char loading[8][5] = {"","","","","","","",""};
 static DVLB_s* vshader_dvlb;
 static shaderProgram_s program;
 static int uLoc_projection;
@@ -152,6 +154,71 @@ u32 currentPath[10] = {1,1,1,1,1,1,1,1,1,1};
 bool ready[10] = {false, false, false, false, false, false, false, false, false, false};
 
 int bikeSpeed = (2 << 8);
+static u32 HSL2RGB(float h, float sl, float l)
+{
+    float v;
+    float r,g,b;
+
+    r = l;   // default to gray
+    g = l;
+    b = l;
+    v = (l <= 0.5) ? (l * (1.0 + sl)) : (l + sl - l * sl);
+    if (v > 0)
+    {
+          float m;
+          float sv;
+          int sextant;
+          float fract, vsf, mid1, mid2;
+
+          m = l + l - v;
+          sv = (v - m ) / v;
+          h *= 6.0;
+          sextant = (int)h;
+          fract = h - sextant;
+          vsf = v * sv * fract;
+          mid1 = m + vsf;
+          mid2 = v - vsf;
+          switch (sextant)
+          {
+                case 0:
+                      r = v;
+                      g = mid1;
+                      b = m;
+                      break;
+                case 1:
+                      r = mid2;
+                      g = v;
+                      b = m;
+                      break;
+                case 2:
+                      r = m;
+                      g = v;
+                      b = mid1;
+                      break;
+                case 3:
+                      r = m;
+                      g = mid2;
+                      b = v;
+                      break;
+                case 4:
+                      r = mid1;
+                      g = m;
+                      b = v;
+                      break;
+                case 5:
+                      r = v;
+                      g = m;
+                      b = mid2;
+                      break;
+          }
+    }
+    u32 out = 0;
+    out |= (int)(r * 255.0f);
+    out |= (int)(g * 255.0f) << 8;
+    out |= (int)(b * 255.0f) << 16;
+    out |= 0xff000000;
+    return out;
+}
 void fill_buffer(void* audioBuffer, size_t offset, size_t size, int frequency) {
 	u32* dest = (u32*) audioBuffer;
 
@@ -196,6 +263,9 @@ typedef struct {
 }Message;
 
 u64 lastApple = 0;
+
+u64 lastRainbow = 0;
+float rainbow = 0.0f;
 
 int actual_bikes = 1;
 Message sentMsg;
@@ -421,6 +491,7 @@ static void rText(float x, float y, float scaleX, float scaleY, bool baseline, c
 		else if(out[position - 1] == 'w') setTextColor(0xffffffff);
 		else if(out[position - 1] == 'z') setTextColor(0xff000000);
 		else if(out[position - 1] == 'j') setTextColor(0xff008275);
+		else if(out[position - 1] == 'u') setTextColor(HSL2RGB(rainbow,0.5,0.5));
 		memset(sub,'\0',sizeof(sub));
 		snprintf(sub,sizeof(sub),"%.*s",substringLength,out + position);
 		result = strstr(sub,"!.");
@@ -609,6 +680,7 @@ keepConsole() {
 	C3D_FrameEnd(0);
 }
 keepXConsole() {
+	if (svcGetSystemTick() - lastRainbow > TICKS_PER_MS * 30) { lastRainbow = svcGetSystemTick(); rainbow += 0.01; if (rainbow > 1) rainbow = 0.0f; }
 	printy = 10.0;
 	setTextColor(0xffffffff); 
 	float height;
@@ -643,6 +715,7 @@ keepXConsole() {
 				else if(out[position - 1] == 'w') setTextColor(0xffffffff);
 				else if(out[position - 1] == 'z') setTextColor(0xff000000);
 				else if(out[position - 1] == 'j') setTextColor(0xff008275);
+				else if(out[position - 1] == 'u') setTextColor(HSL2RGB(rainbow,0.5,0.5));
 				memset(sub,'\0',sizeof(sub));
 				snprintf(sub,sizeof(sub),"%.*s",substringLength,out + position);
 				result = strstr(sub,"!.");
@@ -1493,16 +1566,20 @@ static void gameOptions() {
 	char selectedColor[5];
 	int selected = 0;
 	u32 kDown;
-	while (1) {
+	int load = 0;
+	u64 lastLoad = svcGetSystemTick();
+	while(aptMainLoop()) {
 		keepConsole();
 		for (int i = 0; i < numOptions; i++) {
-			if (options[i]) snprintf(onOrOff,sizeof(onOrOff),WHITE);
+			if (options[i]) snprintf(onOrOff,sizeof(onOrOff),RAINBOW);
 			else snprintf(onOrOff,sizeof(onOrOff),BLACK);
 			if (selected == i) snprintf(selectedColor,sizeof(selectedColor),YELLOW);
 			else snprintf(selectedColor,sizeof(selectedColor),WHITE);
-			snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s%s%s",i,onOrOff,TICK,selectedColor,optionNames[i],WHITE);
+			snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s%s%s",i,onOrOff,loading[load],selectedColor,optionNames[i],WHITE);
 			myprintf(mystring);
 		}
+		if (svcGetSystemTick() - lastLoad > TICKS_PER_MS * 30) { load++; lastLoad = svcGetSystemTick(); }
+		if (load > 7) load = 0;
 		hidScanInput();
 		kDown = hidKeysDown();
 		if (kDown & KEY_DUP || kDown & KEY_CPAD_UP) selected--;
@@ -1765,7 +1842,7 @@ void uds_test()
 				
 				swkbdSetButton(&swkbd, SWKBD_BUTTON_RIGHT, "Done", true);
 				swkbdSetFeatures(&swkbd, SWKBD_PREDICTIVE_INPUT);
-				SwkbdDictWord words[8];
+				SwkbdDictWord words[21];
 				swkbdSetDictWord(&words[0], "put table back", "┬──┬ ノ( ゜-゜ノ)");
 				swkbdSetDictWord(&words[1], "shrug", "¯\\_(ツ)_/¯");
 				swkbdSetDictWord(&words[2], "flip", "(ノ°□°）ノ ~ ┻━┻");
@@ -1774,6 +1851,20 @@ void uds_test()
 				swkbdSetDictWord(&words[5], "kiss", "(づ￣ ³￣)づ");
 				swkbdSetDictWord(&words[6], "fuck", "凸(-_-)凸");
 				swkbdSetDictWord(&words[7], "pig", "（´・ω・ `）");
+				swkbdSetDictWord(&words[8], "sun", "");
+				swkbdSetDictWord(&words[9], "cloud", "");
+				swkbdSetDictWord(&words[10], "umbrella", "");
+				swkbdSetDictWord(&words[11], "telephone", "☎");
+				swkbdSetDictWord(&words[12], "spade", "♠");
+				swkbdSetDictWord(&words[13], "heart", "♥");
+				swkbdSetDictWord(&words[14], "clubs", "♣");
+				swkbdSetDictWord(&words[15], "diamond", "♦");
+				swkbdSetDictWord(&words[16], "happyface", "");
+				swkbdSetDictWord(&words[17], "angry", "");
+				swkbdSetDictWord(&words[18], "sad", "");
+				swkbdSetDictWord(&words[19], "sleepy", "");
+				swkbdSetDictWord(&words[20], "snowman", "");
+
 				swkbdSetDictionary(&swkbd, words, sizeof(words)/sizeof(SwkbdDictWord));
 				static bool reload = false;
 				swkbdSetStatusData(&swkbd, &swkbdStatus, reload, true);
@@ -1795,7 +1886,7 @@ void uds_test()
 		}
 		else if (!ignoreB) if((kDown & KEY_B) || (kHeld & KEY_B)) {
 			myprintf("Scanning...");
-			while (1) {
+			while(aptMainLoop()) {
 				//gspWaitForVBlank();
 				hidScanInput();
 
@@ -1814,7 +1905,7 @@ void uds_test()
 					readyToJoin = false;
 					myprintf("Only one room was found and it was full!");
 					myprintf("Press A to go back to main menu");
-					while (1) {
+					while(aptMainLoop()) {
 						//gspWaitForVBlank();
 						hidScanInput();
 						keepConsole();
@@ -1828,7 +1919,7 @@ void uds_test()
 				int selected = 0;
 				myconsoleClear();
 				myprintf("Please choost a host by 3ds name:");
-				while (1) {
+				while(aptMainLoop()) {
 					//gspWaitForVBlank();
 	
 					network = &networks[0];
@@ -2040,7 +2131,7 @@ void uds_test()
 				UDSSend(msg);
 				memset(replySprite,0,sizeof(replySprite[0]) * 10);
 				lastSprite = svcGetSystemTick();
-				while (1) {
+				while(aptMainLoop()) {
 					hidScanInput();
 					keepConsole();
 					if (hidKeysDown() & KEY_START) { myprintf("ENDING..."); CATASTROPHIC_FAILURE = true; return; }
@@ -2101,7 +2192,6 @@ void uds_test()
 				myprintf("Waiting for connection...");
 				myprintf("Let go of A to play by yourself.");
 			}
-			else myprintf("Preparing room...");
 			while ((kHeld & KEY_A) && !(kUp & KEY_A)) {
 				keepConsole();
 				hidScanInput();
@@ -2161,7 +2251,13 @@ void uds_test()
 			lastChange = svcGetSystemTick();
 			memset(replySprite,0,sizeof(replySprite[0]) * 10);
 			memset(replyChange,0,sizeof(replyChange[0]) * 10);
+			int load = 0;
+			u64 lastLoad = svcGetSystemTick();
 			while (redo && num_bikes > 1) {
+				snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sPreparing room...",loading[load]);
+				myprintf(mystring);
+				if (svcGetSystemTick() - lastLoad > TICKS_PER_MS * 30) { load++; lastLoad = svcGetSystemTick(); }
+				if (load > 7) load = 0;
 				keepConsole();
 				for (i = 0; i < num_bikes; i++) {
 					gspWaitForVBlank();
@@ -2176,7 +2272,7 @@ void uds_test()
 				msg.sprite.y = apple.y;
 				msg.sprite.dx = optionsToInt();
 				UDSResend(replyChange,msg);
-				while (1) {
+				while(aptMainLoop()) {
 					hidScanInput();
 					u32 kDown = hidKeysDown();
 					if (kDown & KEY_START) {
@@ -2226,6 +2322,7 @@ void uds_test()
 									memset(sprites[num_bikes].username,'\0',sizeof(sprites[num_bikes].username));
 									udsGetNodeInfoUsername(&tmpnode,&sprites[num_bikes].username);
 									if (!sprites[num_bikes].node) sprites[num_bikes].node = constatus.total_nodes;
+									connectionEstablished = true;
 									clearString(); snprintf(mystring,sizeof(mystring),"%s%s has joined as %s%s\n",textColors[num_bikes],sprites[num_bikes].username,colorNames[num_bikes],WHITE);
 									myprintf(mystring);
 								}
@@ -2278,13 +2375,21 @@ void uds_test()
 		} else if (!inGame) { //guest connection
 			if (debugging) myprintf("\x1b[0;0HReceiving bike information...\n");
 			keepConsole();
-			myprintf("Loading...");
-			clearString(); snprintf(mystring,sizeof(mystring),"You are %s%s%s!",textColors[myNum],colorNames[myNum],WHITE);
+			clearString();
 			myprintf(mystring);
 			memset(replySprite,true,sizeof(replySprite[0]) * 10);
 			lastSprite = svcGetSystemTick();
 			int oldspeed = 0;
-			while (1) {
+			int load = 0;
+			u64 lastLoad = svcGetSystemTick();
+			while(aptMainLoop()) {
+				snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sLoading...",loading[load]);
+				myprintf(mystring);
+				snprintf(mystring,sizeof(mystring),"\x1b[1;0HYou are %s%s%s!",textColors[myNum],colorNames[myNum],WHITE);
+				myprintf(mystring);
+				if (svcGetSystemTick() - lastLoad > TICKS_PER_MS * 30) { load++; lastLoad = svcGetSystemTick(); }
+				if (load > 7) load = 0;
+				keepConsole();
 				hidScanInput();
 				u32 kDown = hidKeysDown();
 				if (kDown & KEY_START) {
@@ -2935,8 +3040,10 @@ void uds_test()
 			keepSConsole();
 
 			if (totalSpace > (240 * 400) / 2 - 2) {
-				myprintf("\x1b[6;0HThe screen is completely filled!");
-				myprintf("\x1b[7;0HI can't even.");
+				snprintf(mystring,sizeof(mystring),"\x1b[6;0H%sThe screen is completely filled!",RAINBOW);
+				myprintf(mystring);
+				snprintf(mystring,sizeof(mystring),"\x1b[7;0H%sI can't even.%s",RAINBOW,WHITE);
+				myprintf(mystring);
 			}
 			//Be sure to still resend my death msg if someone hasn't gotten it
 			if (!allReplied(replySprite) && svcGetSystemTick() - lastSprite > TICKS_PER_MS * 15 * 6 * lagMult()) {
@@ -2958,7 +3065,7 @@ void uds_test()
 			//if it's not survival mode
 			if (!options[7]) {
 				if (itsATie()) myprintf("\x1b[0;0HIt's a TIE!");
-				else if (getHighestScore() == myNum) myprintf("\x1b[0;0HA winner is YOU!");
+				else if (getHighestScore() == myNum) { snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sA winner is YOU!%s",RAINBOW,WHITE); myprintf(mystring); }
 				else { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[getHighestScore()],sprites[getHighestScore()].username,WHITE); myprintf(mystring); }
 			} else {
 				if (myNum == lastDead) myprintf("\x1b[0;0HA winner is YOU!");
@@ -3210,6 +3317,7 @@ void uds_test()
 			//someone left or joined
 			if(uds_enabled && udsWaitConnectionStatusEvent(false, false))
 			{
+				connectionEstablished = true;
 				readyLock = svcGetSystemTick();
 				for (int i = 0; i < 10; i++) {
 					ready[i] = false;
@@ -3231,7 +3339,7 @@ void uds_test()
 							clearString(); snprintf(mystring,sizeof(mystring),"A player has crashed...");
 							myprintf(mystring);
 							errorQuit = svcGetSystemTick();
-							while (1) {
+							while(aptMainLoop()) {
 								keepConsole();
 								gfxFlushBuffers();
 								gfxSwapBuffers();
@@ -3393,7 +3501,7 @@ int main(int argc, char **argv) {
 			clearString(); snprintf(mystring,sizeof(mystring),"udsInit failed: 0x%08x.\n\nPress A or START to play offline.", (unsigned int)ret);
 			myprintf(mystring);
 		}
-		while (1) {
+		while(aptMainLoop()) {
 			keepConsole();
 			gfxFlushBuffers();
 			gfxSwapBuffers();
@@ -3464,7 +3572,7 @@ int main(int argc, char **argv) {
 					myprintf(mystring);
 					replay = false;
 					CATASTROPHIC_FAILURE = true;
-					while (1) {
+					while(aptMainLoop()) {
 						keepConsole();
 						gfxFlushBuffers();
 						gfxSwapBuffers();
