@@ -1650,6 +1650,20 @@ static void moveSprites() {
 		}
 		sprites[i].x += sprites[i].dx;
 		sprites[i].y += sprites[i].dy;
+		bool deadflag = false;
+		for (int i = 0; i < actual_bikes; i++) {
+			if (i != myNum && !sprites[i].dead && (sprites[i].x >> 8) + (sprites[i].dx >> 8) == (sprites[myNum].x >> 8) && (sprites[i].y >> 8) + (sprites[i].dy >> 8) == (sprites[myNum].y >> 8)) {
+				deadflag = true;
+				break;
+			}
+		}
+		if (deadflag) {
+			sprites[myNum].dead = true;
+			msg.sprite = sprites[myNum];
+			memset(replySprite,0,sizeof(replySprite[0]) * 10);
+			lastSprite = svcGetSystemTick();
+			UDSSend(msg);
+		}
 		if(sprites[i].x < (2<<8)) sprites[i].x = (398) << 8; //screen wrap
 		else if (sprites[i].x > ((398) << 8)) sprites[i].x = (2<<8);
 
