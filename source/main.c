@@ -30,7 +30,7 @@
 #include "bike_png.h"
 #include "qrcode_png.h"
 
-#define VERSION "0.1.6"
+#define VERSION "0.1.7"
 
 #define TICK ""
 #define TICKS_PER_MS 268123
@@ -93,9 +93,9 @@ u64 waitForFinish = 0;
 bool uds_enabled = false;
 bool readyToStart = false;
 bool debugging = false;
-int numOptions = 9;
-bool options[9] = {false,false,false,false,false,false,false,false,false};
-char optionNames[9][50] = {"Boundaries kill", "Tron mode", "Disable Diagonals", "Disable A", "Disable B", "Disable Y", "Enable R", "No apple", "Apples double length"};
+int numOptions = 10;
+bool options[10] = {false,false,false,false,false,false,false,false,false,false};
+char optionNames[10][50] = {"Boundaries kill", "Tron mode", "Disable Diagonals", "Disable A", "Disable B", "Disable Y", "Enable R", "No apple", "Apples double length", "Disappear on death"};
 static DVLB_s* vshader_dvlb;
 static shaderProgram_s program;
 static int uLoc_projection;
@@ -589,6 +589,15 @@ Result writeUsername() {
 
 	return res;
 }
+eraseLine(int n) {
+	int i = pathPos[n];
+	while (i != currentPath[n]) {
+		overwriteSprite(path[i][n].x >> 8, path[i][n].y >> 8, 2, 2, 9);
+		i++;
+		if (i >= 240 * 400) i = 0;
+	}
+	overwriteSprite(path[i][n].x >> 8, path[i][n].y >> 8, 2, 2, 9);
+}
 keepSConsole() {
 	keepXConsole();
 }
@@ -795,7 +804,7 @@ static void UDSResend(bool replied[], Message msg) {
 		}
 		for (int i = 0; i < num_bikes; i++) {
 			if (!replied[i] && i != myNum && sprites[i].node) {
-				if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"resending to... %d: %d",i,sprites[i].node); myprintf(mystring); }
+				if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"resending to... %d: %d",i,sprites[i].node); myprintf(mystring); snprintf(mystring,sizeof(mystring),"sending img: %d speed: %d node: %d",msg.sprite.image,msg.sprite.speed,msg.sprite.node); myprintf(mystring); }
 				ret = udsSendTo(sprites[i].node, 1, UDS_SENDFLAG_Default, &msg, sizeof(msg));
 				if (UDS_CHECK_SENDTO_FATALERROR(ret))
 				{
@@ -1289,7 +1298,7 @@ static void printScore() {
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s has joined the game.",x + i - actual_bikes,textColors[i],sprites[i].username,WHITE);
 		myprintf(mystring);
 	}
-	if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[5;0Hactual_bikes: %d mynum: %d %d",actual_bikes, myNum, num_bikes); myprintf(mystring); }
+	if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[5;0Hgameoptions: %d",optionsToInt()); myprintf(mystring); }
 	//myprintf("\x1b[5;0Hdead: 0x%08x, 0x%08x",dead,dead2);
 	//myprintf("\x1b[6;0Hnum_bikes: %d, myNum: %d",num_bikes,myNum);
 	//myprintf("\x1b[7;0Hgrowth: %d length: %d (%d)",growth[myNum],sprites[myNum].length,getLength(myNum));
@@ -1599,6 +1608,7 @@ static void moveSprites() {
 				memset(replySprite,0,sizeof(replySprite[0]) * 10);
 				lastSprite = svcGetSystemTick();
 				UDSSend(msg); //dead
+				if (options[9]) eraseLine(myNum);
 			}
 			else overwriteSprite(sprites[myNum].x >> 8, sprites[myNum].y >> 8, 2, 2, myNum);
 			ignoreDeath = false;
@@ -1615,7 +1625,7 @@ static void sceneRender(void) {
 
 	for(i = 0; i < num_bikes; i++) {
 		if (i < actual_bikes) { 
-			drawSprite( sprites[i].x >> 8, sprites[i].y >> 8, 2, 2, sprites[i].image);
+			if (!sprites[i].dead) drawSprite( sprites[i].x >> 8, sprites[i].y >> 8, 2, 2, sprites[i].image);
 			if ((path[currentPath[i]][i].x >> 8) != (sprites[i].x >> 8) || (path[currentPath[i]][i].y >> 8) != (sprites[i].y >> 8)) {
 				currentPath[i]++;
 				path[currentPath[i]][i].x = sprites[i].x;
@@ -1676,7 +1686,7 @@ void uds_test()
 
 	u32 recv_buffer_size = UDS_DEFAULT_RECVBUFSIZE;
 	u32 wlancommID = 0x783a9dab;//Unique ID, change this to your own.
-	char *passphrase = "dandewsudssnake.1.6 saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
+	char *passphrase = "dandewsudssnake.1.7 saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
 
 	conntype = UDSCONTYPE_Client;
 
@@ -2152,6 +2162,7 @@ void uds_test()
 			memset(replySprite,0,sizeof(replySprite[0]) * 10);
 			memset(replyChange,0,sizeof(replyChange[0]) * 10);
 			while (redo && num_bikes > 1) {
+				keepConsole();
 				for (i = 0; i < num_bikes; i++) {
 					gspWaitForVBlank();
 					msg.sprite = sprites[i];
@@ -2265,8 +2276,8 @@ void uds_test()
 			}
 			gspWaitForVBlank();
 		} else if (!inGame) { //guest connection
-			myconsoleClear();
 			if (debugging) myprintf("\x1b[0;0HReceiving bike information...\n");
+			keepConsole();
 			myprintf("Loading...");
 			clearString(); snprintf(mystring,sizeof(mystring),"You are %s%s%s!",textColors[myNum],colorNames[myNum],WHITE);
 			myprintf(mystring);
@@ -2720,7 +2731,7 @@ void uds_test()
 						oldspeed = msg.sprite.speed;
 						oldsender = msg.sender;
 						if (msg.sprite.speed == 101 && msg.sender == 0) { UDSSend(msg); } //host is making sure we joined the game.
-						else if (msg.sprite.speed == 999) { //death message
+						else if (msg.sprite.speed == 999) { //quit message
 							errorQuit = 0;
 							if (msg.sender == msg.sprite.node && msg.sender == msg.sprite.image) {
 								for (int i = 0; i < num_bikes; i++) {
@@ -2738,6 +2749,7 @@ void uds_test()
 								UDSDirect(msg.sprite.image,msg);
 							}
 						}
+						else if (msg.sprite.speed == 2020) { } // ignore
 						else if (msg.sprite.speed == 1111) { //join message
 							sprites[msg.sprite.image] = msg.sprite;
 							if (myNum == 0 && msg.sprite.image == msg.sender) {
@@ -2750,6 +2762,7 @@ void uds_test()
 								UDSSend(msg);
 							}
 						}
+						else if (msg.sprite.speed == 123) {} //ignore
 						else if (msg.sprite.speed == 1011 && myNum != 0) {} // ignore
 						else if (msg.sprite.speed == 66) { //change apple message
 							if (msg.sprite.image == myNum) { if (msg.timestamp == lastChange) replyChange[msg.sender] = true; else if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"replyChange from %d: 0x%08x != 0x%08x",msg.sender,msg.timestamp,lastChange); myprintf(mystring); } }
@@ -2795,6 +2808,7 @@ void uds_test()
 							}
 							//this is someone's movement. lets update their sprite information
 							if (msg.sender == msg.sprite.image) UDSDirect(msg.sprite.node,msg);
+							if (msg.sprite.dead && options[9]) eraseLine(msg.sprite.image);
 							int img = msg.sprite.image;
 							//they haven't gone in reverse yet.
 							//let's clean up any graphical artifacts and fill any holes from teleporting
@@ -2831,18 +2845,20 @@ void uds_test()
 										else cy = -2;
 									}
 									int i = 0;
-									if (x == (msg.sprite.x >> 8) || y == (msg.sprite.y >> 8)) while ((path[cp][img].x >> 8) != (msg.sprite.x >> 8) || (path[cp][img].y >> 8) != (msg.sprite.y >> 8)) {
-										overwriteSprite(x, y, 2, 2, img);
-										cp++;
-										x += cx;
-										y += cy;
-										if (cp > 240 * 400) cp = 0;
-										path[cp][img].x = x << 8;
-										path[cp][img].y = y << 8;
-										i++;
+									if (!msg.sprite.dead) {
+										if (x == (msg.sprite.x >> 8) || y == (msg.sprite.y >> 8)) while ((path[cp][img].x >> 8) != (msg.sprite.x >> 8) || (path[cp][img].y >> 8) != (msg.sprite.y >> 8)) {
+											overwriteSprite(x, y, 2, 2, img);
+											cp++;
+											x += cx;
+											y += cy;
+											if (cp > 240 * 400) cp = 0;
+											path[cp][img].x = x << 8;
+											path[cp][img].y = y << 8;
+											i++;
+										}
+										overwriteSprite(x << 8, y << 8, 2, 2, img);
+										currentPath[img] = cp;
 									}
-									overwriteSprite(x << 8, y << 8, 2, 2, img);
-									currentPath[img] = cp;
 								}
 								sprites[msg.sprite.image] = msg.sprite;
 							}
@@ -2895,6 +2911,7 @@ void uds_test()
 		memset(replyChange,1,sizeof(replyChange[0]) * 10);
 		memset(replyScore,0,sizeof(replyScore[0]) * 10);
 		memset(replyDead,1,sizeof(replyDead[0]) * 10);
+		memset(replySprite,0,sizeof(replySprite[0]) * 10);
 		lastScore = 0;
 		int oldQuit = 0;
 		int numLeft = 0;
@@ -2907,6 +2924,7 @@ void uds_test()
 		u64 readyLock = 0;
 		readyLock = svcGetSystemTick();
 		inGame = false;
+		bool saveReady = false;
 
 		while (aptMainLoop()) {
 
@@ -2977,7 +2995,6 @@ void uds_test()
 				}
 			C3D_FrameEnd(0);
 			if (allReplied(replyScore) && myNum == 0 && num_bikes > 1) { if (debugging) myprintf("Everyone got the message. Sending bike information.."); break; }
-			if (waitForFinish != 0 && svcGetSystemTick() - waitForFinish > TICKS_PER_SEC * 4) break;
 			clearString(); snprintf(mystring,sizeof(mystring),"\x1b[3;0H%sPress A if you're ready!",WHITE);
 			myprintf(mystring);
 			myprintf("\x1b[4;0HPress START to quit.");
@@ -2998,7 +3015,7 @@ void uds_test()
 			}
 
 			//Trigger to resend dropped packet of "Start game"
-			if (lastScore && !allReplied(replyScore) && svcGetSystemTick() - lastScore > TICKS_PER_MS * 15 * 30 * lagMult()) {
+			if (myNum == 0 && lastScore && !allReplied(replyScore) && svcGetSystemTick() - lastScore > TICKS_PER_MS * 15 * 30 * lagMult()) {
 				sprites[myNum].node = myNode;
 				strncpy(sprites[myNum].username,myName,sizeof(sprites[myNum].username));
 				msg.sprite = sprites[myNum];
@@ -3028,7 +3045,7 @@ void uds_test()
 				memcpy(&msg,tmpbuf,sizeof(Message));
 				if (debugging) {
 					numLeft++;
-					clearString(); snprintf(mystring,sizeof(mystring),"sender: %d, image: %d, speed: %d node: %d, %d",msg.sender,msg.sprite.image,msg.sprite.speed, msg.sprite.node);
+					clearString(); snprintf(mystring,sizeof(mystring),"sender: %d, image: %d, speed: %d node: %d",msg.sender,msg.sprite.image,msg.sprite.speed, msg.sprite.node);
 					myprintf(mystring);
 				}
 				if (msg.sprite.speed == 999) { //death message
@@ -3107,10 +3124,23 @@ void uds_test()
 					UDSSend(msg);
 				}
 				//ready message
-				else if (msg.sprite.speed == 123 && svcGetSystemTick() - readyLock > TICKS_PER_SEC) { if (!ready[msg.sender]) { numLeft++;  clearString(); snprintf(mystring,sizeof(mystring),"%s%s%s is ready! Waiting on %d more...", textColors[msg.sender], msg.sprite.username, WHITE, notReadies() - 1); myprintf(mystring); } ready[msg.sender] = true; if (msg.sprite.image != myNum) { msg.sprite.image = msg.sender; msg.sprite.speed = 777; UDSSend(msg); } }
+				else if (msg.sprite.speed == 123) { 
+					if (!ready[msg.sender]) { 
+						numLeft++;  
+						clearString(); 
+						snprintf(mystring,sizeof(mystring),"%s%s%s is ready! Waiting on %d more...", textColors[msg.sender], msg.sprite.username, WHITE, notReadies() - 1); 
+						myprintf(mystring); 
+					} 
+					ready[msg.sender] = true; 
+					if (msg.sprite.node != myNode) { 
+						msg.sprite.image = msg.sender; 
+						msg.sprite.speed = 777; 
+						UDSDirect(msg.sprite.node,msg); 
+					} 
+				}
 				//response to ready message
-				else if (msg.sprite.speed == 777 && svcGetSystemTick() - readyLock > TICKS_PER_SEC) {
-					if (msg.sprite.image == myNum) replyChange[msg.sender] = true;
+				else if (msg.sprite.speed == 777) {
+					if (msg.sprite.node == myNode) replyChange[msg.sender] = true;
 
 					//game start message
 				} else if(msg.sprite.speed == 555) {
@@ -3121,7 +3151,7 @@ void uds_test()
 						replyScore[msg.sender] = true;
 					}
 				} else { //or its a sprite change
-					if (msg.sprite.image == myNum) replySprite[msg.sender] = true;
+					if (msg.sprite.image == myNum && msg.sprite.dead && lastSprite == msg.timestamp) replySprite[msg.sender] = true;
 					else if (msg.sprite.image == msg.sender) {
 						sprites[msg.sprite.image] = msg.sprite;
 						UDSSend(msg);
@@ -3157,9 +3187,9 @@ void uds_test()
 				else myprintf("Can't edit modes when you are ready!");
 			}
 			//player pressed A
-			if (kDown & KEY_A && svcGetSystemTick() - readyLock > TICKS_PER_SEC) { 
+			if (kDown & KEY_A || saveReady) {
 				if (num_bikes <= 1) break; 
-				if (!ready[myNum]) { 
+				if (!ready[myNum] && svcGetSystemTick() - readyLock > TICKS_PER_SEC) { 
 					sprites[myNum].node = myNode; 
 					strncpy(sprites[myNum].username,myName,sizeof(sprites[myNum].username)); 
 					msg.sprite = sprites[myNum]; 
@@ -3170,8 +3200,8 @@ void uds_test()
 					numLeft++; 
 					clearString(); snprintf(mystring,sizeof(mystring),"%s%s%s is ready! Waiting on %d more...",textColors[myNum],sprites[myNum].username,WHITE,notReadies() - 1); 
 					myprintf(mystring);
-				} 
-				ready[myNum] = true;  
+					ready[myNum] = true;  
+				} else saveReady = true;
 			}
 
 			//leaving the game
