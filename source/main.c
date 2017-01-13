@@ -660,10 +660,26 @@ Result writeUsername() {
 
 	return res;
 }
+static C3D_Tex spritesheet_tex;
+static C3D_Tex qrcode_tex;
 eraseLine(int n) {
 	int i = pathPos[n];
+	int k = 0;
 	while (i != currentPath[n]) {
+		hidScanInput();
+		if (hidKeysDown() & KEY_START) return;
 		overwriteSprite(path[i][n].x >> 8, path[i][n].y >> 8, 2, 2, 9);
+		k++;
+		if (k > 40) {
+			k = 0;
+			C3D_FrameEnd(0);
+			gfxFlushBuffers();
+			gfxSwapBuffers();
+			C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+			C3D_FrameDrawOn(target);
+			C3D_TexBind(0, &spritesheet_tex);
+			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
+		}
 		i++;
 		if (i >= 240 * 400) i = 0;
 	}
@@ -845,9 +861,6 @@ void overwriteSprite( int x, int y, int width, int height, int image ) {
 	C3D_ImmDrawEnd();
 
 }
-
-static C3D_Tex spritesheet_tex;
-static C3D_Tex qrcode_tex;
 static int lagMult() {
 	if (num_bikes <= 2) return 1;
 	return (num_bikes - 2);
@@ -1027,7 +1040,7 @@ static void setSprites() {
 		path[0][i].y = sprites[i].y;
 
 		if (!options[1]) sprites[i].length = 40;
-		else sprites[i].length = 240 * 400;
+		else sprites[i].length = 240 * 400 - 1;
 		growth[i] = 0;
 		currentPath[i] = 1;
 		pathPos[i] = 0;
@@ -1101,6 +1114,7 @@ static void setApple(int player, int x, int y) {
 	if (options[8]) growth[player] += sprites[player].length;
 	else growth[player] += growthRate;
 
+	if (sprites[player].length >= 240 * 400) sprites[player].length = 240 * 400 - 1;
 	//sprites[player].length += growthRate;
 	usedSpecial = false;
 }
@@ -1371,7 +1385,7 @@ static void printScore() {
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s has joined the game.",x + i - actual_bikes,textColors[i],sprites[i].username,WHITE);
 		myprintf(mystring);
 	}
-	if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[5;0Hgameoptions: %d",optionsToInt()); myprintf(mystring); }
+	if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[5;0Hpathpos: %d currentpath: %d",pathPos[myNum],currentPath[myNum]); myprintf(mystring); }
 	//myprintf("\x1b[5;0Hdead: 0x%08x, 0x%08x",dead,dead2);
 	//myprintf("\x1b[6;0Hnum_bikes: %d, myNum: %d",num_bikes,myNum);
 	//myprintf("\x1b[7;0Hgrowth: %d length: %d (%d)",growth[myNum],sprites[myNum].length,getLength(myNum));
@@ -1671,6 +1685,7 @@ static void moveSprites() {
 					growth[i] += growthRate;
 					sprites[i].length += growthRate;
 				}
+				if (sprites[i].length > 240 * 400) sprites[i].length = 240 * 400 - 1;
 				memset(replyScore,0,sizeof(replyScore[0]) * 10);
 				moveApple();
 				if (debugging) myprintf("Got apple.");
