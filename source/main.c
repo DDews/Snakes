@@ -86,6 +86,7 @@ static C3D_Tex* glyphSheets;
 static textVertex_s* textVtxArray;
 static int textVtxArrayPos = 0;
 
+bool ignoreDeath = true;
 char consoleBuffer[30][100];
 u32 colors[10] = { 0x000cff00, 0x00e4ff00, 0x00004eff, 0x00fc00ff, 0x0000fff0, 0x0025722c, 0x00ff9600, 0x00ff7f82, 0x00ffffff, 0x00000000 };
 u64 waitForFinish = 0;
@@ -680,7 +681,7 @@ struct { float left, right, top, bottom; } images[12] = {
 char textColors[10][12] = {GREEN, YELLOW, BLUE, MAGENTA, CYAN, DARKGREEN, ORANGE, PINK, WHITE, WHITE};
 char colorNames[10][12] = {"Green", "Yellow", "Blue", "Magenta", "Cyan", "Dark Green", "Orange", "Pink", "White", "Black"};
 
-u32 getColor(int x, int y) {
+u32 getColor(int x, int y) { // Thank you WolfVak for the code!
 	if (x > 400) x = 0;
 	else if(x < 0) x = 400;
 	if (y > 240) y = 0;
@@ -1222,7 +1223,7 @@ static void reversePath(int n) {
     int speed = abs(sprites[n].dx);
     if (sprites[n].dy) speed = abs(sprites[n].dy);
     tempPath--;
-    if (tempPath < 0) tempPath = 240*400;
+    if (tempPath < 0) tempPath = 240*400 - 1;
     sprites[n].dx = 0;
     sprites[n].dy = 0;
     if (path[tempPath][n].x == path[currentPath[n]][n].x) {
@@ -1589,7 +1590,7 @@ static void moveSprites() {
 				if (debugging) myprintf("Got apple.");
 			}
 			else if (getLength(i) < 5) {} //don't die if game just started
-			else if ((color1 != colors[8] && color2 != colors[8]) && (color1 > 0 || color2 > 0)) {
+			else if ((color1 != colors[8] && color2 != colors[8]) && (color1 > 0 || color2 > 0) && !ignoreDeath) {
 				dead = color1;
 				dead2 = color2;
 				lastDead = i;
@@ -1599,6 +1600,8 @@ static void moveSprites() {
 				lastSprite = svcGetSystemTick();
 				UDSSend(msg); //dead
 			}
+			else overwriteSprite(sprites[myNum].x >> 8, sprites[myNum].y >> 8, 2, 2, myNum);
+			ignoreDeath = false;
 		}
 	}
 }
@@ -2423,7 +2426,14 @@ void uds_test()
 			drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
 		C3D_FrameEnd(0);
 		lastDead = 0;
+		int totalSpace = 0;
+		ignoreDeath = true;
 		while (aptMainLoop()) {
+			totalSpace = 0;
+			for (int i = 0; i < actual_bikes; i++) {
+				totalSpace += getLength(i);
+			}
+			if (totalSpace >= (240 * 400) / 2 - 2) break; //Wtf? The entire screen (minus 1 spot) is filled with snake? Wow. How do I even test for this?
 			if (everyoneElseIsDead() && sprites[myNum].dead) break;
 			if (errorQuit != 0 && svcGetSystemTick() - errorQuit > TICKS_PER_SEC * 3) {
 				return;
@@ -2664,7 +2674,7 @@ void uds_test()
 					C3D_TexBind(0, &spritesheet_tex);
 					C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
 					//player has pressed R with it enabled
-					if (options[6] && !sprites[myNum].dead && sprites[myNum].speed == 45 && kDown & KEY_R) {
+					if (options[6] && !sprites[myNum].dead && kDown & KEY_R) {
 						reversePath(myNum);
 						if (sprites[myNum].forwards) sprites[myNum].forwards = false;
 						else sprites[myNum].forwards = true;
@@ -2673,6 +2683,7 @@ void uds_test()
 						memset(replySprite,0,sizeof(replySprite[0]) * 10);
 						UDSSend(msg);
 						overwriteSprite(sprites[myNum].x >> 8, sprites[myNum].y >> 8, 2, 2, myNum);
+						ignoreDeath = true; //the frame buffer isn't updated from erasing the last piece of the tail...
 					}
 					//Player has pressed Y and it is not disabled
 					if (!options[5] && !options[7]) if (kDown & KEY_Y && !usedSpecial) {
@@ -2905,6 +2916,10 @@ void uds_test()
 			myprintf("\x1b[2;0H "); //clear the 3rd line in case we scroll text
 			keepSConsole();
 
+			if (totalSpace > (240 * 400) / 2 - 2) {
+				myprintf("\x1b[6;0HThe screen is completely filled!");
+				myprintf("\x1b[7;0HI can't even.");
+			}
 			//Be sure to still resend my death msg if someone hasn't gotten it
 			if (!allReplied(replySprite) && svcGetSystemTick() - lastSprite > TICKS_PER_MS * 15 * 6 * lagMult()) {
 				sprites[myNum].image = myNum;
@@ -2967,7 +2982,6 @@ void uds_test()
 			myprintf(mystring);
 			myprintf("\x1b[4;0HPress START to quit.");
 			if (!myNum) myprintf("\x1b[5;0HPress SELECT to set game modes!");
-
 
 
 
