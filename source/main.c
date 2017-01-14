@@ -776,8 +776,8 @@ struct { float left, right, top, bottom; } images[12] = {
 	{0.0f, 0.5f, 0.0f, 0.5f}, //splash screen
 	{0.0f, 1.0f, 0.0f, 1.0f}, //qrcode
 };
-char textColors[10][12] = {GREEN, YELLOW, BLUE, MAGENTA, CYAN, DARKGREEN, ORANGE, PINK, WHITE, WHITE};
-char colorNames[10][12] = {"Green", "Yellow", "Blue", "Magenta", "Cyan", "Dark Green", "Orange", "Pink", "White", "Black"};
+char textColors[10][12] = {GREEN, YELLOW, BLUE, MAGENTA, CYAN, DARKGREEN, ORANGE, PINK, RAINBOW, WHITE};
+char colorNames[10][12] = {"Green", "Yellow", "Blue", "Magenta", "Cyan", "Dark Green", "Orange", "Pink", "!.u", "Black"};
 
 u32 getColor(int x, int y) { // Thank you WolfVak for the code!
 	if (x > 400) x = 0;
@@ -787,6 +787,7 @@ u32 getColor(int x, int y) { // Thank you WolfVak for the code!
 	u32 offset = ((x * 240) - y + 239) * 3;
 	return (u32) (frameBuf[offset] | frameBuf[offset + 1]  << 8 | frameBuf[offset  + 2] << 16);
 }
+
 //---------------------------------------------------------------------------------
 void drawSprite( int x, int y, int width, int height, int image ) {
 //---------------------------------------------------------------------------------
@@ -796,6 +797,7 @@ void drawSprite( int x, int y, int width, int height, int image ) {
     C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
 	u32 color = getColor(x,y);
 	if (image < 10 && width < 100 && height < 100) if (image != 9 && color != colors[8] && color) return;
+	if (strstr(sprites[image].username,"!.u") != NULL) setTextColor(HSL2RGB(rainbow,0.5,0.5));
 	float left = images[image].left;
 	float right = images[image].right;
 	float top = images[image].top;
@@ -837,6 +839,7 @@ void overwriteSprite( int x, int y, int width, int height, int image ) {
 	float top = images[image].top;
 	float bottom = images[image].bottom;
 
+	if (strstr(sprites[image].username,"!.u") != NULL) setTextColor(HSL2RGB(rainbow,0.5,0.5));
 	// Draw a textured quad directly
 	C3D_ImmDrawBegin(GPU_TRIANGLES);
 		C3D_ImmSendAttrib(x, y, 0.5f, 0.0f); // v0=position
@@ -1004,6 +1007,9 @@ int getKiller(u32 color) {
 	for (int i = 0; i < NUM_SPRITES; i++) {
 		if (color == colors[i]) return i;
 	}
+	for (int i = 0; i < NUM_SPRITES; i++) {
+		if (strstr(sprites[i].username,"!.u") != NULL) return i;
+	}
 	return 0;
 }
 bool hasCommonY(int num) {
@@ -1063,7 +1069,7 @@ static void changeApple() {
 	drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 9);
 	apple.x = (rand() % (400 - 32)) << 8;
 	apple.y = (rand() % (240 - 32)) << 8;
-	while (getColor(apple.x >> 8, apple.y >> 8)) {
+	while (getColor(apple.x >> 8, apple.y >> 8) || getColor((apple.x >> 8) + 1, (apple.y >> 8) + 1)) {
 		apple.x = (rand() % (400 - 32)) << 8;
 		apple.y = (rand() % (240 - 32)) << 8;
 	}
@@ -1080,7 +1086,7 @@ static void moveApple() {
 	int oldy = apple.y;
 	apple.x = (rand() % (400 - 32)) << 8;
 	apple.y = (rand() % (240 - 32)) << 8;
-	while (getColor(apple.x >> 8, apple.y >> 8)) {
+	while (getColor(apple.x >> 8, apple.y >> 8) || getColor((apple.x >> 8) + 1, (apple.y >> 8) + 1)) {
 		apple.x = (rand() % (400 - 32)) << 8;
 		apple.y = (rand() % (240 - 32)) << 8;
 	}
@@ -1729,6 +1735,7 @@ static void sceneRender(void) {
 	// Update the uniforms
 	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
 
+	if (!options[7] && !getColor(apple.x >> 8, apple.y >> 8)) drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
 	for(i = 0; i < num_bikes; i++) {
 		if (i < actual_bikes) { 
 			if (!sprites[i].dead) drawSprite( sprites[i].x >> 8, sprites[i].y >> 8, 2, 2, sprites[i].image);
@@ -1830,11 +1837,15 @@ void uds_test()
 	bool ignoreB = false;
 	while (aptMainLoop()) {
 		hidScanInput();
+		u32 kDown = hidKeysDown();
+		u32 kHeld = hidKeysHeld();
+		u32 kUp = hidKeysUp();
 
 		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target);
 			if (qrcode) C3D_TexBind(0, &qrcode_tex);
 			else C3D_TexBind(0, &spritesheet_tex);
+			//if (kDown & KEY_L || kHeld & KEY_L) writeColor(10,10,HSL2RGB(rainbow,0.5,0.5));
 			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
 			if (qrcode) drawSprite(72,0,240,240,11);
 			else drawSprite(72,0,256,256,10);
@@ -1846,9 +1857,6 @@ void uds_test()
 
 		//myprintf("Version %s\n\nHold A to host\nPress B to scan for a host.\nPress Y to change name.\nPress X for QRCode to latest release.\nPress START to exit.\n",VERSION);
 		// Respond to user input
-		u32 kDown = hidKeysDown();
-		u32 kHeld = hidKeysHeld();
-		u32 kUp = hidKeysUp();
 		if (kDown & KEY_START) return;
 		if (kDown & KEY_SELECT) { gameOptions(); myconsoleClear(); ignoreB = true; snprintf(mystring,sizeof(mystring),"Version %s",VERSION); myprintf(mystring); myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit."); }
 		if (kDown & KEY_L) { debugging = true; myprintf("Debugging turned on."); }
@@ -2807,8 +2815,8 @@ void uds_test()
 					olddead = sprites[myNum].dead;
 				clearFlag = false;
 			}*/
-			gfxFlushBuffers();
-			gfxSwapBuffers();
+			/*gfxFlushBuffers();
+			gfxSwapBuffers();*/
 			
 			//Wait for VBlank
 			//gspWaitForVBlank();
@@ -3018,8 +3026,8 @@ void uds_test()
 						oldAppley = apple.y;
 					}
 				C3D_FrameEnd(0);
-				gfxFlushBuffers();
-				gfxSwapBuffers();
+				/*gfxFlushBuffers();
+				gfxSwapBuffers();*/
 			}
 			keepConsole();
 			if (everyoneElseIsDead()) {
