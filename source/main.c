@@ -30,7 +30,7 @@
 #include "bike_png.h"
 #include "qrcode_png.h"
 
-#define VERSION "0.1.7"
+#define VERSION "0.2.0"
 
 #define TICK ""
 #define TICKS_PER_MS 268123
@@ -95,6 +95,7 @@ bool uds_enabled = false;
 bool readyToStart = false;
 bool debugging = false;
 int numOptions = 10;
+bool erased[10] = {false,false,false,false,false,false,false,false,false,false};
 bool options[10] = {false,false,false,false,false,false,false,false,false,false};
 char optionNames[10][50] = {"Boundaries kill", "Tron mode", "Disable Diagonals", "Disable A", "Disable B", "Disable Y", "Enable R", "No apple", "Apples double length", "Disappear on death"};
 char loading[8][5] = {"","","","","","","",""};
@@ -663,6 +664,8 @@ Result writeUsername() {
 static C3D_Tex spritesheet_tex;
 static C3D_Tex qrcode_tex;
 eraseLine(int n) {
+	if (erased[n]) return;
+	erased[n] = true;
 	int i = pathPos[n];
 	int k = 0;
 	while (i != currentPath[n]) {
@@ -2581,6 +2584,9 @@ void uds_test()
 		lastDead = 0;
 		int totalSpace = 0;
 		ignoreDeath = true;
+		for (int i = 0; i < NUM_SPRITES; i++) {
+			erased[i] = false;
+		}
 		while (aptMainLoop()) {
 			totalSpace = 0;
 			for (int i = 0; i < actual_bikes; i++) {
