@@ -30,7 +30,7 @@
 #include "bike_png.h"
 #include "qrcode_png.h"
 
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 
 #define TICK ""
 #define TICKS_PER_MS 268123
@@ -87,6 +87,7 @@ static C3D_Tex* glyphSheets;
 static textVertex_s* textVtxArray;
 static int textVtxArrayPos = 0;
 
+u32 highScore = 0;
 u64 flash = 0;
 bool ignoreDeath = true;
 char consoleBuffer[30][100];
@@ -110,6 +111,7 @@ static shaderProgram_s textprogram;
 static int textuLoc_projection;
 static C3D_Mtx textprojection;
 
+int totalSpace = 0;
 int lastDead = 0;
 char mystring[200];
 bool cheats = false;
@@ -275,7 +277,12 @@ u64 lastScore;
 u64 lastChange;
 u64 lastSprite;
 u64 lastDeadmsg;
+u64 lastHighscore;
+u64 lastScreenScore;
+bool replyScreenScore[10] = {0,0,0,0,0,0,0,0,0,0};
+bool receivedScreenScore[10] = {0,0,0,0,0,0,0,0,0,0};
 bool replyDead[10] = {0,0,0,0,0,0,0,0,0,0};
+bool replyHighscore[10] = {0,0,0,0,0,0,0,0,0,0};
 bool replyScore[10] = {0,0,0,0,0,0,0,0,0,0};
 bool replyChange[10] = {0,0,0,0,0,0,0,0,0,0};
 bool replySprite[10] = {0,0,0,0,0,0,0,0,0,0};
@@ -592,6 +599,7 @@ Result importUsername() {
 	FS_Path* fsPath = util_make_path_utf8(pathBuf);
 	if(fsPath != NULL) {
 	    char name[50];
+	    u32 score = 0;
 
 	    Handle fileHandle = 0;
 	    if(R_SUCCEEDED(res = FSUSER_OpenFileDirectly(&fileHandle, ARCHIVE_SDMC, fsMakePath(PATH_EMPTY, ""), *fsPath, FS_OPEN_READ, 0))) {
@@ -603,6 +611,12 @@ Result importUsername() {
 		        myprintf(mystring);*/
 		        snprintf(overwriteName,sizeof(overwriteName),"%s",name);
 	    	}
+	    	res = FSFILE_Read(fileHandle, &bytesRead, sizeof(name), &score, sizeof(score));
+	        if (bytesRead > 0) {
+	        	snprintf(mystring,sizeof(mystring),"Current Highscore: %u",score);
+	        	myprintf(mystring);
+	        	highScore = score;
+	        }
 	        FSFILE_Close(fileHandle);
 	    }
 
@@ -645,6 +659,7 @@ Result writeUsername() {
 	        u32 bytesRead = 0;
 	        res = FSFILE_Write(fileHandle, &bytesRead, 0, overwriteName, sizeof(overwriteName), 0);
 
+	        res = FSFILE_Write(fileHandle, &bytesRead, sizeof(overwriteName), &highScore, sizeof(highScore), 0);
 	        FSFILE_Close(fileHandle);
 	    }
 
@@ -664,31 +679,6 @@ Result writeUsername() {
 }
 static C3D_Tex spritesheet_tex;
 static C3D_Tex qrcode_tex;
-eraseLine(int n) {
-	if (erased[n]) return;
-	erased[n] = true;
-	int i = pathPos[n];
-	int k = 0;
-	while (i != currentPath[n]) {
-		hidScanInput();
-		if (hidKeysDown() & KEY_START) return;
-		overwriteSprite(path[i][n].x >> 8, path[i][n].y >> 8, 2, 2, 9);
-		k++;
-		if (k > 40) {
-			k = 0;
-			C3D_FrameEnd(0);
-			gfxFlushBuffers();
-			gfxSwapBuffers();
-			C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
-			C3D_FrameDrawOn(target);
-			C3D_TexBind(0, &spritesheet_tex);
-			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
-		}
-		i++;
-		if (i >= 240 * 400) i = 0;
-	}
-	overwriteSprite(path[i][n].x >> 8, path[i][n].y >> 8, 2, 2, 9);
-}
 keepSConsole() {
 	keepXConsole();
 }
@@ -867,6 +857,31 @@ void overwriteSprite( int x, int y, int width, int height, int image ) {
 
 	C3D_ImmDrawEnd();
 
+}
+eraseLine(int n) {
+	if (erased[n]) return;
+	erased[n] = true;
+	int i = pathPos[n];
+	int k = 0;
+	while (i != currentPath[n]) {
+		hidScanInput();
+		if (hidKeysDown() & KEY_START) return;
+		overwriteSprite(path[i][n].x >> 8, path[i][n].y >> 8, 2, 2, 9);
+		k++;
+		if (k > 40) {
+			k = 0;
+			C3D_FrameEnd(0);
+			gfxFlushBuffers();
+			gfxSwapBuffers();
+			C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+			C3D_FrameDrawOn(target);
+			C3D_TexBind(0, &spritesheet_tex);
+			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
+		}
+		i++;
+		if (i >= 240 * 400) i = 0;
+	}
+	overwriteSprite(path[i][n].x >> 8, path[i][n].y >> 8, 2, 2, 9);
 }
 static int lagMult() {
 	if (num_bikes <= 2) return 1;
@@ -1389,12 +1404,15 @@ static void printScore() {
 	if (options[6]) {
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[5;0HPress  to go in reverse."); myprintf(mystring);
 	}
-	int x = 5;
-	if (options[6]) x = 6;
+	int x = 7;
+	if (options[6]) x = 8;
 	for (int i = actual_bikes; i < num_bikes; i++) {
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s has joined the game.",x + i - actual_bikes,textColors[i],sprites[i].username,WHITE);
 		myprintf(mystring);
 	}
+	snprintf(mystring,sizeof(mystring),"\x1b[6;0H%sScreen Score: %d",WHITE,totalSpace);
+	if ((unsigned int)totalSpace > highScore) snprintf(mystring,sizeof(mystring),"\x1b[6;0HScreen Score: %s%d",RAINBOW,totalSpace);
+	myprintf(mystring);
 	if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[5;0Hpathpos: %d currentpath: %d",pathPos[myNum],currentPath[myNum]); myprintf(mystring); }
 	//myprintf("\x1b[5;0Hdead: 0x%08x, 0x%08x",dead,dead2);
 	//myprintf("\x1b[6;0Hnum_bikes: %d, myNum: %d",num_bikes,myNum);
@@ -1800,6 +1818,18 @@ static SwkbdCallbackResult wrongName(void* user, const char** ppMessage, const c
 
 	return SWKBD_CALLBACK_OK;
 }
+void setHighscore(u32 score) {
+	highScore = score;
+	snprintf(mystring,sizeof(mystring),"%sNew High Score: %u",RAINBOW,highScore);
+	myprintf(mystring);
+	msg.sprite = sprites[myNum];
+	msg.sprite.speed = 3030;
+	msg.sprite.dx = highScore;
+	lastHighscore = svcGetSystemTick();
+	memset(replyHighscore,0,sizeof(replyHighscore[0]) * 10);
+	UDSSend(msg);
+	writeUsername();
+}
 void uds_test()
 {
 	memset(overwriteName,'\0',sizeof(overwriteName));
@@ -1818,7 +1848,7 @@ void uds_test()
 
 	u32 recv_buffer_size = UDS_DEFAULT_RECVBUFSIZE;
 	u32 wlancommID = 0x783a9dab;//Unique ID, change this to your own.
-	char *passphrase = "dandewsudssnake.1.7 saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
+	char *passphrase = "dandewsudssnake.2.1 saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
 
 	conntype = UDSCONTYPE_Client;
 
@@ -1851,7 +1881,7 @@ void uds_test()
 	clearString(); 
 	snprintf(mystring,sizeof(mystring),"Version %s",VERSION);
 	myprintf(mystring);
-	myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit.");
+	myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press + to reset high score."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit."); myprintf(" ");
 	importUsername();
 	bool ignoreB = false;
 	while (aptMainLoop()) {
@@ -1859,7 +1889,7 @@ void uds_test()
 		u32 kDown = hidKeysDown();
 		u32 kHeld = hidKeysHeld();
 		u32 kUp = hidKeysUp();
-
+ 
 		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target);
 			if (qrcode) C3D_TexBind(0, &qrcode_tex);
@@ -1877,10 +1907,11 @@ void uds_test()
 		//myprintf("Version %s\n\nHold A to host\nPress B to scan for a host.\nPress Y to change name.\nPress X for QRCode to latest release.\nPress START to exit.\n",VERSION);
 		// Respond to user input
 		if (kDown & KEY_START) return;
-		if (kDown & KEY_SELECT) { gameOptions(); myconsoleClear(); ignoreB = true; snprintf(mystring,sizeof(mystring),"Version %s",VERSION); myprintf(mystring); myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit."); }
+		if (kDown & KEY_SELECT) { gameOptions(); myconsoleClear(); ignoreB = true; snprintf(mystring,sizeof(mystring),"Version %s",VERSION); myprintf(mystring); myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press + to reset high score."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit."); myprintf(" "); importUsername(); }
 		if (kDown & KEY_L) { debugging = true; myprintf("Debugging turned on."); }
 		if (kDown & KEY_A) { hosting = 1; break; }
 		if (kHeld & KEY_R && kDown & KEY_X) { cheats = true; myprintf("Move the apple with touchscreen!"); snprintf(overwriteName,sizeof(overwriteName),"Cheater"); }
+		if (kHeld & KEY_R && kDown & KEY_Y) { highScore = 0; writeUsername(); myprintf("Reset high score."); }
 		else if (kDown & KEY_X) qrcode = true;
 		else if (kDown & KEY_Y) {
 			if (!cheats) {
@@ -2015,7 +2046,7 @@ void uds_test()
 			}
 			myconsoleClear();
 			if (readyToJoin) break;
-			else { clearString(); snprintf(mystring,sizeof(mystring),"Version %s",VERSION);myprintf(mystring);	myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit."); }
+			else { snprintf(mystring,sizeof(mystring),"Version %s",VERSION); myprintf(mystring); myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press + to reset high score."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit."); myprintf(" "); importUsername(); }
 		}
 		if (kUp & KEY_B) ignoreB = false;
 
@@ -2595,7 +2626,7 @@ void uds_test()
 			drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
 		C3D_FrameEnd(0);
 		lastDead = 0;
-		int totalSpace = 0;
+		totalSpace = 0;
 		ignoreDeath = true;
 		for (int i = 0; i < NUM_SPRITES; i++) {
 			erased[i] = false;
@@ -3073,6 +3104,14 @@ void uds_test()
 		memset(replyScore,0,sizeof(replyScore[0]) * 10);
 		memset(replyDead,1,sizeof(replyDead[0]) * 10);
 		memset(replySprite,0,sizeof(replySprite[0]) * 10);
+		memset(replyHighscore,1,sizeof(replyHighscore[0]) * 10);
+		memset(replyScreenScore,0,sizeof(replyScreenScore[0]) * 10);
+		memset(receivedScreenScore,0,sizeof(receivedScreenScore[0]) * 10);
+		msg.sprite = sprites[myNum];
+		msg.sprite.speed = 5050;
+		msg.sprite.dx = totalSpace;
+		lastScreenScore = svcGetSystemTick();
+		UDSSend(msg);
 		lastScore = 0;
 		int oldQuit = 0;
 		int numLeft = 0;
@@ -3086,7 +3125,8 @@ void uds_test()
 		readyLock = svcGetSystemTick();
 		inGame = false;
 		bool saveReady = false;
-
+		bool displayedHS = false;
+		bool iWin = false;
 		while (aptMainLoop()) {
 
 			C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
@@ -3118,13 +3158,27 @@ void uds_test()
 				lastDeadmsg = svcGetSystemTick();
 				UDSResend(replyDead,msg);
 			}
+			if (!allReplied(replyHighscore) && svcGetSystemTick() - lastHighscore > TICKS_PER_MS * 15 * 6 * lagMult()) {
+				msg.sprite = sprites[myNum];
+				msg.sprite.speed = 3030;
+				msg.sprite.dx = highScore;
+				lastHighscore = svcGetSystemTick();
+				UDSResend(replyHighscore,msg);
+			}
+			if (!allReplied(replyScreenScore) && svcGetSystemTick() - lastScreenScore > TICKS_PER_MS * 15 * 6 * lagMult()) {
+				msg.sprite = sprites[myNum];
+				msg.sprite.speed = 5050;
+				msg.sprite.dx = totalSpace;
+				lastScreenScore = svcGetSystemTick();
+				UDSResend(replyScreenScore,msg);
+			}
 			//if it's not survival mode
 			if (!options[7]) {
 				if (itsATie()) myprintf("\x1b[0;0HIt's a TIE!");
-				else if (getHighestScore() == myNum) { snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sA winner is YOU!%s",RAINBOW,WHITE); myprintf(mystring); }
+				else if (getHighestScore() == myNum) { iWin = true; snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sA winner is YOU!%s",RAINBOW,WHITE); myprintf(mystring); }
 				else { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[getHighestScore()],sprites[getHighestScore()].username,WHITE); myprintf(mystring); }
 			} else {
-				if (myNum == lastDead) myprintf("\x1b[0;0HA winner is YOU!");
+				if (myNum == lastDead) { iWin = true; snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sA winner is YOU!%s",RAINBOW,WHITE); myprintf(mystring); }
 				else { snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[lastDead],sprites[lastDead].username,WHITE); myprintf(mystring); }
 			}
 			clearString(); snprintf(mystring,sizeof(mystring),"\x1b[1;0HScore: ");
@@ -3165,6 +3219,11 @@ void uds_test()
 
 
 
+			snprintf(mystring,sizeof(mystring),"\x1b[5;0HScreen score: %d",totalSpace);
+			myprintf(mystring);
+			if (iWin && allReplied(receivedScreenScore)) {
+				if ((unsigned int)totalSpace > highScore) setHighscore((unsigned int)totalSpace);
+			}
 			if (num_bikes == 1 && actual_bikes > 1) { numLeft++; num_bikes--; clearString(); snprintf(mystring,sizeof(mystring),"Everyone has left the game!"); myprintf(mystring); }
 			
 			//Trigger to resend dropped packet of "Ready"
@@ -3234,6 +3293,20 @@ void uds_test()
 					}
 				} //connection killed by guest*/
 				else if (msg.sprite.speed == 1011) { } //ignore
+				else if (msg.sprite.speed == 3030) {
+					if (msg.sprite.image != myNum) {
+						if (!displayedHS) snprintf(mystring,sizeof(mystring),"%s%s%s's new High Score: %s%u",textColors[msg.sprite.image],msg.sprite.username,WHITE,RAINBOW,(unsigned int)msg.sprite.dx); myprintf(mystring);
+						displayedHS = true;
+						UDSSend(msg);
+					} else if (msg.sprite.image == sprites[myNum].image) replyHighscore[msg.sender] = true;
+				}
+				else if (msg.sprite.speed == 5050) {
+					if (msg.sprite.image != myNum) {
+						if (msg.sprite.dx > totalSpace) totalSpace = msg.sprite.dx;
+						receivedScreenScore[msg.sender] = true;
+						UDSSend(msg);
+					} else if (msg.sprite.image == sprites[myNum].image) replyScreenScore[msg.sender] = true;
+				}
 				else if (msg.sprite.speed == 2020) {
 					if (msg.sender == 0) {
 						int n = msg.sprite.dx;
@@ -3335,7 +3408,6 @@ void uds_test()
 
 
 
-			if (kDown & KEY_B && debugging) { numLeft++; clearString(); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%d",numLeft + 5, (svcGetSystemTick() - waitForFinish) / TICKS_PER_SEC); myprintf(mystring); }
 			if (myNum == 0 && kDown & KEY_SELECT) {
 				if (!ready[0]) { 
 					gameOptions(); 

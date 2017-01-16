@@ -38,7 +38,7 @@ RUN_FLAGS :=
 
 ifeq ($(TARGET),$(filter $(TARGET),3DS WIIU))
     TITLE := $(NAME)
-    DESCRIPTION := Ver 0.1
+    DESCRIPTION := Ver 0.2
     AUTHOR := Desynched
 endif
 
