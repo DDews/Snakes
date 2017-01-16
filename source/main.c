@@ -1410,8 +1410,11 @@ static void printScore() {
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s has joined the game.",x + i - actual_bikes,textColors[i],sprites[i].username,WHITE);
 		myprintf(mystring);
 	}
-	snprintf(mystring,sizeof(mystring),"\x1b[6;0H%sScreen Score: %d",WHITE,totalSpace);
-	if ((unsigned int)totalSpace > highScore) snprintf(mystring,sizeof(mystring),"\x1b[6;0HScreen Score: %s%d",RAINBOW,totalSpace);
+	int screenScore = totalSpace;
+	if (options[4]) screenScore *= 1.1;
+	if (options[5]) screenScore *= 1.1;
+	snprintf(mystring,sizeof(mystring),"\x1b[6;0H%sScreen Score: %d",WHITE,screenScore);
+	if ((unsigned int)screenScore > highScore) snprintf(mystring,sizeof(mystring),"\x1b[6;0HScreen Score: %s%d",RAINBOW,screenScore);
 	myprintf(mystring);
 	if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[5;0Hpathpos: %d currentpath: %d",pathPos[myNum],currentPath[myNum]); myprintf(mystring); }
 	//myprintf("\x1b[5;0Hdead: 0x%08x, 0x%08x",dead,dead2);
@@ -3109,6 +3112,8 @@ void uds_test()
 		memset(receivedScreenScore,0,sizeof(receivedScreenScore[0]) * 10);
 		msg.sprite = sprites[myNum];
 		msg.sprite.speed = 5050;
+		if (options[4]) totalSpace *= 1.1;
+		if (options[5]) totalSpace *= 1.1;
 		msg.sprite.dx = totalSpace;
 		lastScreenScore = svcGetSystemTick();
 		UDSSend(msg);
