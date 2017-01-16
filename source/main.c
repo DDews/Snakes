@@ -87,6 +87,7 @@ static C3D_Tex* glyphSheets;
 static textVertex_s* textVtxArray;
 static int textVtxArrayPos = 0;
 
+u64 flash = 0;
 bool ignoreDeath = true;
 char consoleBuffer[30][100];
 u32 colors[10] = { 0x000cff00, 0x00e4ff00, 0x00004eff, 0x00fc00ff, 0x0000fff0, 0x0025722c, 0x00ff9600, 0x00ff7f82, 0x00ffffff, 0x00000000 };
@@ -1710,6 +1711,7 @@ static void moveSprites() {
 				}
 				if (sprites[i].length > 240 * 400) sprites[i].length = 240 * 400 - 1;
 				memset(replyScore,0,sizeof(replyScore[0]) * 10);
+				flash = svcGetSystemTick();
 				moveApple();
 				if (debugging) myprintf("Got apple.");
 			}
@@ -1731,6 +1733,12 @@ static void moveSprites() {
 	}
 }
 
+static void drawWall(int img) {
+	drawSprite(0,0,1,238,img);
+	drawSprite(0,0,400,1,img);
+	drawSprite(398,0,1,238,img);
+	drawSprite(0,238,396,1,img);
+}
 //---------------------------------------------------------------------------------
 static void sceneRender(void) {
 //---------------------------------------------------------------------------------
@@ -1738,6 +1746,14 @@ static void sceneRender(void) {
 	// Update the uniforms
 	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
 
+	if (flash != 0) {
+		if (svcGetSystemTick() - flash < TICKS_PER_MS * 30 * 7) drawWall(8);
+		else {
+			if (options[0]) drawWall(7);
+			else drawWall(9);
+			flash = 0;
+		}
+	}
 	if (!options[7] && !getColor(apple.x >> 8, apple.y >> 8)) drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
 	for(i = 0; i < num_bikes; i++) {
 		if (i < actual_bikes) { 
@@ -2574,10 +2590,7 @@ void uds_test()
 			C3D_TexBind(0, &spritesheet_tex);
 			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
 			if (options[0]) {
-				drawSprite(0,0,1,238,7);
-				drawSprite(0,0,400,1,7);
-				drawSprite(398,0,1,238,7);
-				drawSprite(0,238,396,1,7);
+				drawWall(7);
 			}
 			drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
 		C3D_FrameEnd(0);
