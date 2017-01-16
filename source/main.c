@@ -30,7 +30,7 @@
 #include "bike_png.h"
 #include "qrcode_png.h"
 
-#define VERSION "0.2.1"
+#define VERSION "0.2.2"
 
 #define TICK ""
 #define TICKS_PER_MS 268123
@@ -96,10 +96,10 @@ u64 waitForFinish = 0;
 bool uds_enabled = false;
 bool readyToStart = false;
 bool debugging = false;
-int numOptions = 10;
-bool erased[10] = {false,false,false,false,false,false,false,false,false,false};
-bool options[10] = {false,false,false,false,false,false,false,false,false,false};
-char optionNames[10][50] = {"Boundaries kill", "Tron mode", "Disable Diagonals", "Disable A", "Disable B", "Disable Y", "Enable R", "No apple", "Apples double length", "Disappear on death"};
+int numOptions = 11;
+bool erased[11] = {false,false,false,false,false,false,false,false,false,false,false};
+bool options[11] = {false,false,false,false,false,false,false,false,false,false,false};
+char optionNames[11][50] = {"Boundaries kill", "Tron mode", "Disable Diagonals", "Disable A", "Disable B", "Disable Y", "Enable R", "No apple", "Apples double length", "Disappear on death", "Occasional holes"};
 char loading[8][5] = {"","","","","","","",""};
 static DVLB_s* vshader_dvlb;
 static shaderProgram_s program;
@@ -111,6 +111,7 @@ static shaderProgram_s textprogram;
 static int textuLoc_projection;
 static C3D_Mtx textprojection;
 
+int hole = 0;
 int totalSpace = 0;
 int lastDead = 0;
 char mystring[200];
@@ -247,6 +248,7 @@ typedef struct {
 	int node;
 	int diag;
 	bool forwards;
+	u8 hole;
 	char username[50];
 }Sprite;
 
@@ -746,6 +748,14 @@ keepXConsole() {
 		if (printy > 320) break;
 	}
 }
+int getImg(int img) {
+	if (sprites[img].hole) return 9;
+	return img;
+}
+int getAndDecImg(int img) {
+	if (sprites[img].hole) { sprites[img].hole--; if (sprites[img].hole) return 9; }
+	return img;
+}
 myconsoleClear() {
 	consolei = 0;
 	memset(consoleBuffer,'\0',sizeof(consoleBuffer[0][0]) * 60 * 30);
@@ -1052,6 +1062,7 @@ static void setSprites() {
 		while (hasCommonY(i)) {
 			sprites[i].y = (rand() % (240 - 32 )) << 8 ;
 		}
+		sprites[i].hole = 0;
 		sprites[i].dx = (2<<8);
 		sprites[i].dy = 0;
 		sprites[i].image = i;
@@ -1468,7 +1479,7 @@ static void eraseOvershoot(Sprite sprite) {
 }
 static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, int img) {
 	if ((sx >> 8) == (dx >> 8) && (sy >> 8) == (dy >> 8)) {
-		drawSprite(sy,dy,2,2,img);
+		drawSprite(sy,dy,2,2,getImg(img));
 		return;
 	}
 	int udx = dx >> 8;
@@ -1514,8 +1525,8 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 				pathn++;
 				if (pathn > 240 * 400) pathn = 0;
 				i = 0;
-				if (x != udx) while (x != udx && i < 40) { i++; drawSprite(x,y,2,2,img); path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; pathn++; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0;  if (pathn > 240 * 400) pathn = 0; x += tx; }
-				else while (y != udy && i < 40) { i++; drawSprite(x,y,2,2,img); path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0; pathn++; if (pathn > 240 * 400) pathn = 0; y += ty; }
+				if (x != udx) while (x != udx && i < 40) { i++; drawSprite(x,y,2,2,getAndDecImg(img)); path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; pathn++; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0;  if (pathn > 240 * 400) pathn = 0; x += tx; }
+				else while (y != udy && i < 40) { i++; drawSprite(x,y,2,2,getAndDecImg(img)); path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0; pathn++; if (pathn > 240 * 400) pathn = 0; y += ty; }
 			}
 			path[pathn][img].x = x << 8;
 			path[pathn][img].y = y << 8;
@@ -1529,7 +1540,7 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 				y = path[pathn][img].y >> 8;
 				i = 0;
 				drawSprite(x,y,2,2,img);
-				while ((path[pathn][img].x >> 8) != udx && i < 20) { i++; x += tx; pathn++; drawSprite(x,y,2,2,img); path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0; if (pathn > 240 * 400) pathn = 0; }
+				while ((path[pathn][img].x >> 8) != udx && i < 20) { i++; x += tx; pathn++; drawSprite(x,y,2,2,getAndDecImg(img)); path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0; if (pathn > 240 * 400) pathn = 0; }
 				//if (pathn == currentPath[img]) currentPath[img]++;
 				if (currentPath[img] > 240 * 400) currentPath[img] = 0;
 			}
@@ -1539,13 +1550,13 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 				y = path[pathn][img].y >> 8;
 				i = 0;
 				drawSprite(x,y,2,2,img);
-				while ((path[pathn][img].y >> 8) != udy && i < 20) { i++; y += ty; drawSprite(x,y,2,2,img); pathn++; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0; if (pathn > 240 * 400) pathn = 0; }
+				while ((path[pathn][img].y >> 8) != udy && i < 20) { i++; y += ty; drawSprite(x,y,2,2,getAndDecImg(img)); pathn++; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0; if (pathn > 240 * 400) pathn = 0; }
 				//if (pathn == currentPath[img]) currentPath[img]++;
 				if (currentPath[img] > 240 * 400) currentPath[img] = 0;
 			} else if (sprites[img].diag) {
 				if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"%sYEP%s",RED,WHITE); myprintf(mystring); }
 			}
-			drawSprite(dx,dy,2,2,img);
+			drawSprite(dx,dy,2,2,getAndDecImg(img));
 		}
 		return;
 	}
@@ -1594,7 +1605,7 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 
 		path[currentPath[img]][img].y = (y << 8);
 		path[currentPath[img]][img].x = (x << 8);
-		drawSprite(x, y, 2, 2, img);
+		drawSprite(x, y, 2, 2, getAndDecImg(img));
 		currentPath[img]++;
 		if (currentPath[img] > 240 * 400) currentPath[img] = 0;
 		x += w;
@@ -1644,6 +1655,16 @@ static void moveSprites() {
 	int i;
 	for(i = 0; i < num_bikes; i++) {
 		if (sprites[i].dead || !timeDiff(i)) continue;
+		if (options[10] && i == myNum && rand() % 80 == 79) {
+			sprites[myNum].hole = (rand() % 3) + 1;
+			hole = sprites[myNum].hole;
+			msg.sprite = sprites[myNum];
+			lastSprite = svcGetSystemTick();
+			UDSSend(msg);
+		}
+		else if (sprites[i].hole > 0) {
+			sprites[i].hole--;
+		}
 		if (i != myNum && sprites[i].diag) { //auto diagonals for cpad
 			if (sprites[i].diag == NORTHEAST) {
 				if (sprites[i].dx) {
@@ -1778,7 +1799,7 @@ static void sceneRender(void) {
 	if (!options[7] && !getColor(apple.x >> 8, apple.y >> 8)) drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
 	for(i = 0; i < num_bikes; i++) {
 		if (i < actual_bikes) { 
-			if (!sprites[i].dead) drawSprite( sprites[i].x >> 8, sprites[i].y >> 8, 2, 2, sprites[i].image);
+			if (!sprites[i].dead) drawSprite( sprites[i].x >> 8, sprites[i].y >> 8, 2, 2, getImg(i));
 			if ((path[currentPath[i]][i].x >> 8) != (sprites[i].x >> 8) || (path[currentPath[i]][i].y >> 8) != (sprites[i].y >> 8)) {
 				currentPath[i]++;
 				path[currentPath[i]][i].x = sprites[i].x;
@@ -1851,7 +1872,7 @@ void uds_test()
 
 	u32 recv_buffer_size = UDS_DEFAULT_RECVBUFSIZE;
 	u32 wlancommID = 0x783a9dab;//Unique ID, change this to your own.
-	char *passphrase = "dandewsudssnake.2.1 saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
+	char *passphrase = "dandewsudssnake.2.2 saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
 
 	conntype = UDSCONTYPE_Client;
 
