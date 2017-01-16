@@ -1681,7 +1681,7 @@ static void moveSprites() {
 		else if (sprites[i].y > (238 << 8)) sprites[i].y = (2<<8);
 
 		frameTicks[i] = svcGetSystemTick();
-		while (getLength(i) * .9 > sprites[i].length) { //fix length: erase
+		while (getLength(i) > sprites[i].length) { //fix length: erase
 			drawSprite(path[pathPos[i]][i].x >> 8, path[pathPos[i]][i].y >> 8, 2, 2, 9);
 			pathPos[i]++;
 		}
