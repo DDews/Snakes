@@ -1411,8 +1411,8 @@ static void printScore() {
 		myprintf(mystring);
 	}
 	int screenScore = totalSpace;
-	if (options[4]) screenScore *= 1.1;
-	if (options[5]) screenScore *= 1.1;
+	if (options[4]) screenScore *= 1.25;
+	if (options[5]) screenScore *= 1.25;
 	snprintf(mystring,sizeof(mystring),"\x1b[6;0H%sScreen Score: %d",WHITE,screenScore);
 	if ((unsigned int)screenScore > highScore) snprintf(mystring,sizeof(mystring),"\x1b[6;0HScreen Score: %s%d",RAINBOW,screenScore);
 	myprintf(mystring);
@@ -3112,8 +3112,8 @@ void uds_test()
 		memset(receivedScreenScore,0,sizeof(receivedScreenScore[0]) * 10);
 		msg.sprite = sprites[myNum];
 		msg.sprite.speed = 5050;
-		if (options[4]) totalSpace *= 1.1;
-		if (options[5]) totalSpace *= 1.1;
+		if (options[4]) totalSpace *= 1.25;
+		if (options[5]) totalSpace *= 1.25;
 		msg.sprite.dx = totalSpace;
 		lastScreenScore = svcGetSystemTick();
 		UDSSend(msg);
