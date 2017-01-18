@@ -30,7 +30,7 @@
 #include "bike_png.h"
 #include "qrcode_png.h"
 
-#define VERSION "0.2.2"
+#define VERSION "0.2.3"
 
 #define TICK ""
 #define TICKS_PER_MS 268123
@@ -907,6 +907,8 @@ static void UDSResend(bool replied[], Message msg) {
 	ret=0;
 	if (msg.sprite.speed == 77) msg.timestamp = lastScore;
 	else if (msg.sprite.speed == 66) msg.timestamp = lastChange;
+	else if (msg.sprite.speed == 2020) msg.timestamp = lastDeadmsg;
+	else if (msg.sprite.speed == 5050) msg.timestamp = lastScreenScore;
 	else msg.timestamp = lastSprite;
 	if(conntype!=UDSCONTYPE_Spectator)
 	{
@@ -961,9 +963,11 @@ static int UDSSend(Message msg) {
 	msg.sender = myNum;
 	if (debugging) { snprintf(mystring,sizeof(mystring),"sending speed: %d image: %d diag: %d",msg.sprite.speed,msg.sprite.image,msg.sprite.diag); myprintf(mystring); }
 	if (msg.sprite.image == myNum && msg.sprite.speed == 77) { msg.timestamp = lastScore; }
+	else if (msg.sprite.speed == 999 && msg.sprite.image == myNode && msg.sprite.node == myNode) { msg.timestamp = lastSprite; msg.sender = myNode; }
+	else if (msg.sprite.speed == 2020 && myNum == 0) msg.timestamp = lastDeadmsg;
+	else if (msg.sprite.speed == 5050 && myNum == msg.sprite.image) msg.timestamp = lastScreenScore;
 	else if (msg.sprite.image == myNum && msg.sprite.speed == 66) { msg.timestamp = lastChange; }
 	else if (msg.sprite.image == myNum) { msg.timestamp = lastSprite; }
-	else if (msg.sprite.speed == 999 && msg.sprite.image == myNode && msg.sprite.node == myNode) { msg.timestamp = lastSprite; msg.sender = myNode; }
 	sentMsg = msg;
 	ret=0;
 	if(conntype!=UDSCONTYPE_Spectator)//Spectators aren't allowed to send data.
@@ -2688,7 +2692,6 @@ void uds_test()
 					msg.sprite.dx = score[myNum];
 					msg.sprite.x = apple.x;
 					msg.sprite.y = apple.y;
-					lastScore = svcGetSystemTick();
 					UDSResend(replyScore,msg);
 				}
 				else if (!allReplied(replyChange) && svcGetSystemTick() - lastChange > TICKS_PER_MS * 15 * 6 * lagMult()) {
@@ -2697,7 +2700,6 @@ void uds_test()
 					msg.sprite.speed = 66;
 					msg.sprite.x = apple.x;
 					msg.sprite.y = apple.y;
-					lastChange = svcGetSystemTick();
 					UDSResend(replyChange,msg);
 				}
 				if (!allReplied(replySprite) && svcGetSystemTick() - lastSprite > TICKS_PER_MS * 15 * 6 * lagMult()) {
@@ -2978,15 +2980,41 @@ void uds_test()
 								UDSSend(msg);
 							}
 						}
+						else if (msg.sprite.speed == 5050) {} //ignore
 						else if (msg.sprite.speed == 123) {} //ignore
 						else if (msg.sprite.speed == 1011 && myNum != 0) {} // ignore
 						else if (msg.sprite.speed == 66) { //change apple message
-							if (msg.sprite.image == myNum) { if (msg.timestamp == lastChange) replyChange[msg.sender] = true; else if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"replyChange from %d: 0x%08x != 0x%08x",msg.sender,msg.timestamp,lastChange); myprintf(mystring); } }
-							else if (msg.sender == msg.sprite.image) { UDSDirect(msg.sprite.node,msg); if (debugging) myprintf("changing apple..."); if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) updateApple(msg.sprite.x,msg.sprite.y); }
+							if (msg.sprite.image == myNum) { 
+								if (msg.timestamp == lastChange) replyChange[msg.sender] = true; 
+								else if (debugging) { 
+									clearString(); 
+									snprintf(mystring,sizeof(mystring),"replyChange from %d: 0x%08x != 0x%08x",msg.sender,msg.timestamp,lastChange); 
+									myprintf(mystring); 
+								} 
+							}
+							else if (msg.sender == msg.sprite.image) { 
+								UDSDirect(msg.sprite.node,msg); 
+								if (debugging) myprintf("changing apple..."); 
+								if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) updateApple(msg.sprite.x,msg.sprite.y); 
+							}
 						}
 						else if (msg.sprite.speed == 77) { //scored a point message
-							if (msg.sprite.image == myNum) { if (msg.timestamp == lastScore) replyScore[msg.sender] = true;  else if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"replyScore from %d: 0x%08x != 0x%08x",msg.sender,msg.timestamp,lastScore); myprintf(mystring); } }
-							else if (msg.sender == msg.sprite.image) { UDSDirect(msg.sprite.node,msg); if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) { sprites[msg.sprite.image].length = msg.sprite.length; setApple(msg.sprite.image, msg.sprite.x, msg.sprite.y); } score[msg.sprite.image] = msg.sprite.dx; }
+							if (msg.sprite.image == myNum) { 
+								if (msg.timestamp == lastScore) replyScore[msg.sender] = true; 
+								else if (debugging) { 
+									clearString(); 
+									snprintf(mystring,sizeof(mystring),"replyScore from %d: 0x%08x != 0x%08x",msg.sender,msg.timestamp,lastScore); 
+									myprintf(mystring); 
+								} 
+							}
+							else if (msg.sender == msg.sprite.image) { 
+								UDSDirect(msg.sprite.node,msg); 
+								if (!(msg.sprite.x == apple.x && msg.sprite.y == apple.y)) { 
+									sprites[msg.sprite.image].length = msg.sprite.length; 
+									setApple(msg.sprite.image, msg.sprite.x, msg.sprite.y); 
+								} 
+								score[msg.sprite.image] = msg.sprite.dx; 
+							}
 						}
 						else if (msg.sprite.image == myNum) { if (msg.sprite.speed == 1001) break; if (msg.timestamp == lastSprite) replySprite[msg.sender] = true;  else if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"replySprite from %d: 0x%08x != 0x%08x",msg.sender,msg.timestamp,lastSprite); myprintf(mystring);} }
 						else if (msg.sprite.speed == 1001) {} //ignore.
@@ -3323,44 +3351,47 @@ void uds_test()
 					if (msg.sprite.image != myNum) {
 						if (!displayedHS) snprintf(mystring,sizeof(mystring),"%s%s%s's new High Score: %s%u",textColors[msg.sprite.image],msg.sprite.username,WHITE,RAINBOW,(unsigned int)msg.sprite.dx); myprintf(mystring);
 						displayedHS = true;
-						UDSSend(msg);
+						UDSDirect(msg.sprite.node,msg);
 					} else if (msg.sprite.image == sprites[myNum].image) replyHighscore[msg.sender] = true;
 				}
 				else if (msg.sprite.speed == 5050) {
 					if (msg.sprite.image != myNum) {
 						if (msg.sprite.dx > totalSpace) totalSpace = msg.sprite.dx;
 						receivedScreenScore[msg.sender] = true;
-						UDSSend(msg);
+						UDSDirect(msg.sprite.node,msg);
 					} else if (msg.sprite.image == sprites[myNum].image) replyScreenScore[msg.sender] = true;
 				}
 				else if (msg.sprite.speed == 2020) {
 					if (msg.sender == 0) {
-						int n = msg.sprite.dx;
-						snprintf(mystring,sizeof(mystring),"%s%s%s was in game options...",textColors[0],sprites[0].username,WHITE);
-						myprintf(mystring);
-						bool flag = false;
-						for (unsigned int i = 0; i != numOptions; ++i)
-						{
-							if (options[i] && !(n & 1)) {
-								flag = true;
-							  	snprintf(mystring,sizeof(mystring),"    %s%s%s is now %soff%s.",DARKYELLOW,optionNames[i],WHITE,RED,WHITE);
-							  	myprintf(mystring);
+						if (lastDeadmsg != msg.timestamp) {
+							lastDeadmsg = msg.timestamp;
+							int n = msg.sprite.dx;
+							snprintf(mystring,sizeof(mystring),"%s%s%s was in game options...",textColors[0],sprites[0].username,WHITE);
+							myprintf(mystring);
+							bool flag = false;
+							for (unsigned int i = 0; i != numOptions; ++i)
+							{
+								if (options[i] && !(n & 1)) {
+									flag = true;
+								  	snprintf(mystring,sizeof(mystring),"    %s%s%s is now %soff%s.",DARKYELLOW,optionNames[i],WHITE,RED,WHITE);
+								  	myprintf(mystring);
+								}
+							 	n /= 2;
 							}
-						 	n /= 2;
-						}
-						n = msg.sprite.dx;
-						for (unsigned int i = 0; i != numOptions; ++i)
-						{
-							if (!options[i] && n & 1) {
-								flag = true;
-							  	snprintf(mystring,sizeof(mystring),"    %s%s%s is now %son%s.",YELLOW,optionNames[i],WHITE,GREEN,WHITE);
-							  	myprintf(mystring);
+							n = msg.sprite.dx;
+							for (unsigned int i = 0; i != numOptions; ++i)
+							{
+								if (!options[i] && n & 1) {
+									flag = true;
+								  	snprintf(mystring,sizeof(mystring),"    %s%s%s is now %son%s.",YELLOW,optionNames[i],WHITE,GREEN,WHITE);
+								  	myprintf(mystring);
+								}
+							 	n /= 2;
 							}
-						 	n /= 2;
+							if (!flag) myprintf("    but nothing was changed...");
+							setOptions(msg.sprite.dx);
 						}
-						if (!flag) myprintf("    but nothing was changed...");
-						setOptions(msg.sprite.dx);
-						UDSSend(msg);
+						UDSDirect(msg.sprite.node,msg);
 					} else {
 						replyDead[msg.sender] = true;
 					}
@@ -3390,7 +3421,8 @@ void uds_test()
 					if (!ready[msg.sender]) { 
 						numLeft++;  
 						clearString(); 
-						snprintf(mystring,sizeof(mystring),"%s%s%s is ready! Waiting on %d more...", textColors[msg.sender], msg.sprite.username, WHITE, notReadies() - 1); 
+						snprintf(mystring,sizeof(mystring),"%s%s%s is ready!",textColors[msg.sender],msg.sprite.username,WHITE);
+						if (notReadies() - 1) snprintf(mystring,sizeof(mystring),"%s%s%s is ready! Waiting on %d more...", textColors[msg.sender], msg.sprite.username, WHITE, notReadies() - 1); 
 						myprintf(mystring); 
 					} 
 					ready[msg.sender] = true; 
