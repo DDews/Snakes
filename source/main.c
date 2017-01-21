@@ -913,7 +913,7 @@ static void UDSResend(bool replied[], Message msg) {
 	else msg.timestamp = lastSprite;
 	if(conntype!=UDSCONTYPE_Spectator)
 	{
-		if (debugging) {
+		/*if (debugging) {
 			char replies[10];
 			clearString(); snprintf(mystring,sizeof(mystring),"replies: ");
 			for (int i = 0; i < num_bikes; i++) {
@@ -922,10 +922,10 @@ static void UDSResend(bool replied[], Message msg) {
 				strcat(mystring,replies);
 			}
 			myprintf(mystring);
-		}
+		}*/
 		for (int i = 0; i < num_bikes; i++) {
 			if (!replied[i] && i != myNum && sprites[i].node) {
-				if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"resending to... %d: %d",i,sprites[i].node); myprintf(mystring); snprintf(mystring,sizeof(mystring),"sending img: %d speed: %d node: %d",msg.sprite.image,msg.sprite.speed,msg.sprite.node); myprintf(mystring); }
+				//if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"resending to... %d: %d",i,sprites[i].node); myprintf(mystring); snprintf(mystring,sizeof(mystring),"sending img: %d speed: %d node: %d",msg.sprite.image,msg.sprite.speed,msg.sprite.node); myprintf(mystring); }
 				ret = udsSendTo(sprites[i].node, 1, UDS_SENDFLAG_Default, &msg, sizeof(msg));
 				if (UDS_CHECK_SENDTO_FATALERROR(ret))
 				{
@@ -947,7 +947,7 @@ static int UDSDirect(int node, Message msg) {
 	ret=0;
 	if(conntype!=UDSCONTYPE_Spectator)//Spectators aren't allowed to send data.
 	{
-		if (debugging) { snprintf(mystring,sizeof(mystring),"direct to %d: img: %d speed: %d",node,msg.sprite.image,msg.sprite.speed); myprintf(mystring); }
+		//if (debugging) { snprintf(mystring,sizeof(mystring),"direct to %d: img: %d speed: %d",node,msg.sprite.image,msg.sprite.speed); myprintf(mystring); }
 		ret = udsSendTo(node, 1, UDS_SENDFLAG_Default, &msg, sizeof(msg));
 		if(UDS_CHECK_SENDTO_FATALERROR(ret))
 		{
@@ -962,7 +962,7 @@ static int UDSDirect(int node, Message msg) {
 static int UDSSend(Message msg) {
 	if (!uds_enabled || debugHold) return;
 	msg.sender = myNum;
-	if (debugging) { snprintf(mystring,sizeof(mystring),"sending speed: %d image: %d diag: %d",msg.sprite.speed,msg.sprite.image,msg.sprite.diag); myprintf(mystring); }
+	//if (debugging) { snprintf(mystring,sizeof(mystring),"sending speed: %d image: %d diag: %d",msg.sprite.speed,msg.sprite.image,msg.sprite.diag); myprintf(mystring); }
 	if (msg.sprite.image == myNum && msg.sprite.speed == 77) { msg.timestamp = lastScore; }
 	else if (msg.sprite.speed == 999 && msg.sprite.image == myNode && msg.sprite.node == myNode) { msg.timestamp = lastSprite; msg.sender = myNode; }
 	else if (msg.sprite.speed == 2020 && myNum == 0) msg.timestamp = lastDeadmsg;
@@ -1472,15 +1472,35 @@ static void eraseOvershoot(Sprite sprite) {
 	int cy = path[currentPath[img]][img].y >> 8;
 	int udx = sprite.x >> 8;
 	int udy = sprite.y >> 8;
-	if (cx == udx && cy == udy) return;
+	if (udx == cx && udy == cy) return;
+	if (udx != cx && udy != cy) return;
+	if ((path[currentPath[img]][img].x + sprites[img].dx) >> 8 == udx && (path[currentPath[img]][img].y + sprites[img].dy) >> 8 == udy) return;
+	snprintf(mystring,sizeof(mystring),"%d %d != %d %d",cx,cy,udx,udy);
+	myprintf(mystring);
 	int pathn = currentPath[img];
+	int oldpathn = pathPos[img];
 	int i = 0;
-	while ((path[pathn][img].x >> 8) != udx && (path[pathn][img].y >> 8) != udy && pathn != pathPos[img] && i < 40) {
+	while (((path[pathn][img].x >> 8) != udx || (path[pathn][img].y >> 8) != udy) && pathn != pathPos[img] && i < 40) {
 		i++;
 		drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9);
 		pathn--;
+		overwriteSprite(path[oldpathn][img].x >> 8, path[oldpathn][img].y >> 8, 2, 2, img);
+		oldpathn--;
 		if (pathn < 0) pathn = 240 * 400;
+		if (oldpathn < 0) oldpathn = 240 * 400;
 	}
+	currentPath[img] = pathn;
+	pathPos[img] = oldpathn;
+	i = 0;
+	while (getLength(img) <= sprites[img].length + 1 && i < 20) {
+		i++;
+		overwriteSprite(path[oldpathn][img].x >> 8, path[oldpathn][img].y >> 8, 2, 2, img);
+		oldpathn--;
+		if (oldpathn < 0) oldpathn = 240 * 400;
+		pathPos[img] = oldpathn;
+	}
+	currentPath[img] = pathn;
+	pathPos[img] = oldpathn;
 }
 static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, int img) {
 	if ((sx >> 8) == (dx >> 8) && (sy >> 8) == (dy >> 8)) {
@@ -1508,7 +1528,7 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 	int prevy2 = path[pathn][img].y >> 8;
 	pathn = currentPath[img];
 	int i = 0;
-	if (x != udx && y != udy) {
+	if (x != udx && y != udy && (sprites[img].x + sprites[img].dx) >> 8 != udx && (sprites[img].y + sprites[img].dy) >> 8 != udy) {
 		int tx, ty;
 		if (w < 0) tx = -2;
 		else tx = 2;
@@ -1627,12 +1647,50 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 	if (x != udx && y != udy) return;
 	if (sprites[img].speed < msg.speed) { //Erase overshoot.
 		i = 0;
-		if (udx == x) { while (path[pathn][img].y >> 8 != udy && i < 20) { i++; drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); pathn--; if (pathn < 0) pathn = 240 * 400; } drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); currentPath[img] = pathn; growth[img] += i; return; }
-		else if (udy == y) { while (path[pathn][img].x >> 8 != udx && i < 20) { i++; drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); pathn--; if (pathn < 0) pathn = 240 * 400; } drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); currentPath[img] = pathn; growth[img] += i; return; }
+		if (udx == x) { 
+			if (abs(udy - y) > 2) {
+				while (path[pathn][img].y >> 8 != udy && i < 20) { i++; drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); pathn--; if (pathn < 0) pathn = 240 * 400; } 
+				drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); 
+				i = 0;
+				currentPath[img] = pathn; 
+				//growth[img] += i;
+				int oldpathn = pathPos[img]; //fix the length we removed
+				while (getLength(img) <= sprites[img].length + 1 && i < 20) {
+					i++;
+					overwriteSprite(path[oldpathn][img].x >> 8, path[oldpathn][img].y >> 8, 2, 2, img);
+					oldpathn--;
+					if (oldpathn < 0) oldpathn = 240 * 400;
+					pathPos[img] = oldpathn;
+				}
+				currentPath[img] = pathn;
+				pathPos[img] = oldpathn;
+				return; 
+			}
+		}
+		else if (udy == y) { 
+			if (abs(udx - x) > 2) {
+				while (path[pathn][img].x >> 8 != udx && i < 20) { i++; drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); pathn--; if (pathn < 0) pathn = 240 * 400; } 
+				drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); 
+				currentPath[img] = pathn; 
+				//growth[img] += i; 
+				i = 0;
+				int oldpathn = pathPos[img]; //fix the length we removed
+				while (getLength(img) <= sprites[img].length + 1 && i < 20) {
+					i++;
+					overwriteSprite(path[oldpathn][img].x >> 8, path[oldpathn][img].y >> 8, 2, 2, img);
+					oldpathn--;
+					if (oldpathn < 0) oldpathn = 240 * 400;
+					pathPos[img] = oldpathn;
+				}
+				currentPath[img] = pathn;
+				pathPos[img] = oldpathn;
+				return; 
+			}
+		}
 	} else if (sprites[img].speed > msg.speed) { //draw undershoot
 		i = 0;
-		if (udx == x) { while (y != udy && i < 20) { i++; y += h; drawSprite(x, y, 2, 2, img); pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; } currentPath[img] = pathn; return; }
-		if (udy == y) { while (x != udx && i < 20) { i++; x += w; drawSprite(x, y, 2, 2, img); pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; } currentPath[img] = pathn; return; }
+		if (udx == x) { drawSprite(x, y, 2, 2, img); while (y != udy && i < 20) { i++; y += h; drawSprite(x, y, 2, 2, img); pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; } currentPath[img] = pathn; return; }
+		if (udy == y) { drawSprite(x, y, 2, 2, img); while (x != udx && i < 20) { i++; x += w; drawSprite(x, y, 2, 2, img); pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; } currentPath[img] = pathn; return; }
 	}
 	i = 0;
 
@@ -2418,6 +2476,7 @@ void uds_test()
 			memset(replyChange,0,sizeof(replyChange[0]) * 10);
 			int load = 0;
 			u64 lastLoad = svcGetSystemTick();
+			debugHold = false;
 			while (redo && num_bikes > 1) {
 				snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sPreparing room...",loading[load]);
 				myprintf(mystring);
@@ -2999,7 +3058,7 @@ void uds_test()
 					{
 						//Message msg;
 						memcpy(&msg,tmpbuf,sizeof(Message));
-						if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"sender: %d image: %d speed: %d diag: %d",msg.sender,msg.sprite.image, msg.sprite.speed,msg.sprite.diag); myprintf(mystring); }
+						//if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"sender: %d image: %d speed: %d diag: %d",msg.sender,msg.sprite.image, msg.sprite.speed,msg.sprite.diag); myprintf(mystring); }
 						oldspeed = msg.sprite.speed;
 						oldsender = msg.sender;
 						if (msg.sprite.speed == 101 && msg.sender == 0) { UDSSend(msg); } //host is making sure we joined the game.
@@ -3375,8 +3434,8 @@ void uds_test()
 				memcpy(&msg,tmpbuf,sizeof(Message));
 				if (debugging) {
 					numLeft++;
-					clearString(); snprintf(mystring,sizeof(mystring),"sender: %d, image: %d, speed: %d node: %d",msg.sender,msg.sprite.image,msg.sprite.speed, msg.sprite.node);
-					myprintf(mystring);
+					/*clearString(); snprintf(mystring,sizeof(mystring),"sender: %d, image: %d, speed: %d node: %d",msg.sender,msg.sprite.image,msg.sprite.speed, msg.sprite.node);
+					myprintf(mystring);*/
 				}
 				if (msg.sprite.speed == 999) { //death message
 					if (msg.sender == msg.sprite.node && msg.sprite.image == msg.sprite.node) {
@@ -3493,7 +3552,7 @@ void uds_test()
 					//game start message
 				} else if(msg.sprite.speed == 555) {
 					if (msg.sender == 0) {
-						UDSSend(msg); 
+						UDSDirect(msg.sprite.node,msg); 
 						break; 
 					} else if (myNum == 0) {
 						replyScore[msg.sender] = true;
@@ -3502,7 +3561,7 @@ void uds_test()
 					if (msg.sprite.image == myNum && msg.sprite.dead && lastSprite == msg.timestamp) replySprite[msg.sender] = true;
 					else if (msg.sprite.image == msg.sender) {
 						sprites[msg.sprite.image] = msg.sprite;
-						UDSSend(msg);
+						UDSDirect(msg.sprite.node,msg);
 					}
 				}
 			}
@@ -3825,7 +3884,7 @@ int main(int argc, char **argv) {
 				if(actual_size >= sizeof(Message))//If no data frame is available, udsPullPacket() will return actual_size=0.
 				{
 					memcpy(&msg,tmpbuf,sizeof(Message));
-					if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"image: %d sender: %d node: %d speed: %d", msg.sprite.image, msg.sender, msg.sprite.node, msg.sprite.speed); myprintf(mystring); }
+					//if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"image: %d sender: %d node: %d speed: %d", msg.sprite.image, msg.sender, msg.sprite.node, msg.sprite.speed); myprintf(mystring); }
 					if (msg.sprite.speed == 999 && msg.sprite.image == myNode && msg.timestamp == lastSprite) { if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"%d leaving: %d",myNode,msg.sprite.node); myprintf(mystring); } replySprite[msg.sprite.node] = true; }
 					int responded = 0;
 					for (int i = 0; i <= NUM_SPRITES; i++) {
