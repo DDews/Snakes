@@ -30,7 +30,7 @@
 #include "bike_png.h"
 #include "qrcode_png.h"
 
-#define VERSION "0.2.3"
+#define VERSION "0.2.4"
 
 #define TICK ""
 #define TICKS_PER_MS 268123
@@ -111,6 +111,7 @@ static shaderProgram_s textprogram;
 static int textuLoc_projection;
 static C3D_Mtx textprojection;
 
+bool debugHold = false;
 int hole = 0;
 int totalSpace = 0;
 int lastDead = 0;
@@ -959,7 +960,7 @@ static int UDSDirect(int node, Message msg) {
 	return 0;
 }
 static int UDSSend(Message msg) {
-	if (!uds_enabled) return;
+	if (!uds_enabled || debugHold) return;
 	msg.sender = myNum;
 	if (debugging) { snprintf(mystring,sizeof(mystring),"sending speed: %d image: %d diag: %d",msg.sprite.speed,msg.sprite.image,msg.sprite.diag); myprintf(mystring); }
 	if (msg.sprite.image == myNum && msg.sprite.speed == 77) { msg.timestamp = lastScore; }
@@ -1515,31 +1516,73 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 		else ty = 2;
 	
 		if ((prevx - prevx2 > 0 && w > 0) || (prevx - prevx2 < 0 && w < 0) || (prevy - prevy2 > 0 && h > 0) || (prevy - prevy2 < 0 && h < 0)) {//draw
-			if (sprites[img].diag && x != udx && y != udy) {
-				if (debugging) myprintf("OMG");
-				pathn = currentPath[img];
-				while (x != udx && y != udy && i < 40) {
-					i++;
-					drawSprite(x,y,2,2,9);
-					pathn--;
-					if (pathn < 0) pathn = 240 * 400;
+			if (x != udx && y != udy) {
+				if (msg.diag || sprites[img].diag) { //they are going diagonal or have been going diagonal...
+					while (path[pathn][img].x >> 8 != udx && path[pathn][img].y >> 8 != udy && i < 20) {
+						i++;
+						drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); //erase the overshoot
+						pathn--;
+						if (pathn < 0) pathn = 240 * 400;
+					}
 					x = path[pathn][img].x >> 8;
 					y = path[pathn][img].y >> 8;
+					//now draw to where they are now
+					if (x == udx) while (y != udy && i < 20) { i++; drawSprite(x,y,2,2,img); y += ty; pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; }
+					else if (y == udy) while (x != udx && i < 20) { i++; drawSprite(x,y,2,2,img); x += tx; pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; }
+					i = 0;
+					currentPath[img] = pathn;
+				} else { //They are further than where they were, and are not in line with their previous line.
+					if (prevx == prevx2) {
+						while (y != udy && i < 20) { //first branch. draw the y
+							i++;
+							drawSprite(x,y,2,2,img);
+							y += ty;
+							pathn++;
+							if (pathn > 240 * 400) pathn = 0;
+							path[pathn][img].x = x << 8;
+							path[pathn][img].y = y << 8;
+						}
+						i = 0;
+						while (x != udx && i < 20) { //second branch. draw the x
+							i++;
+							drawSprite(x,y,2,2,img);
+							x += tx;
+							pathn++;
+							if (pathn > 240 * 400) pathn = 0;
+							path[pathn][img].x = x << 8;
+							path[pathn][img].y = y << 8;
+						}
+					} else if (prevy == prevy2) {
+						while (x != udx && i < 20) { //first branch. draw the x
+							i++;
+							drawSprite(x,y,2,2,img);
+							x += tx;
+							pathn++;
+							if (pathn > 240 * 400) pathn = 0;
+							path[pathn][img].x = x << 8;
+							path[pathn][img].y = y << 8;
+						}
+						i = 0;
+						while (y != udy && i < 20) { //second branch. draw the y
+							i++;
+							drawSprite(x,y,2,2,img);
+							y += ty;
+							pathn++;
+							if (pathn > 240 * 400) pathn = 0;
+							path[pathn][img].x = x << 8;
+							path[pathn][img].y = y << 8;
+						}
+					}
 				}
-				pathn++;
-				if (pathn > 240 * 400) pathn = 0;
+				currentPath[img] = pathn;
 				i = 0;
-				if (x != udx) while (x != udx && i < 40) { i++; drawSprite(x,y,2,2,getAndDecImg(img)); path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; pathn++; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0;  if (pathn > 240 * 400) pathn = 0; x += tx; }
-				else while (y != udy && i < 40) { i++; drawSprite(x,y,2,2,getAndDecImg(img)); path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0; pathn++; if (pathn > 240 * 400) pathn = 0; y += ty; }
 			}
-			path[pathn][img].x = x << 8;
-			path[pathn][img].y = y << 8;
 
 		} 
 		else { //erase
 			if (debugging) myprintf("!!!!");
 			if (prevx == prevx2) {
-				while ((path[pathn][img].y >> 8) != udy && i < 20) { i++; drawSprite(path[pathn][img].x >> 8,path[pathn][img].y >> 8,2,2,9); pathn--; }
+				while ((path[pathn][img].y >> 8) != udy && i < 20) { i++; drawSprite(path[pathn][img].x >> 8,path[pathn][img].y >> 8,2,2,9); pathn--; if (pathn < 0) pathn = 240 * 400; }
 				x = path[pathn][img].x >> 8;
 				y = path[pathn][img].y >> 8;
 				i = 0;
@@ -1549,7 +1592,7 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 				if (currentPath[img] > 240 * 400) currentPath[img] = 0;
 			}
 			else if (prevy == prevy2) {
-				while ((path[pathn][img].x >> 8) != udx && i < 20) { i++; drawSprite(path[pathn][img].x >> 8,path[pathn][img].y >> 8,2,2,9); pathn--; }
+				while ((path[pathn][img].x >> 8) != udx && i < 20) { i++; drawSprite(path[pathn][img].x >> 8,path[pathn][img].y >> 8,2,2,9); pathn--; if (pathn < 0) pathn = 240 * 400; }
 				x = path[pathn][img].x >> 8;
 				y = path[pathn][img].y >> 8;
 				i = 0;
@@ -1579,11 +1622,18 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 
 	if (w != 0 && h != 0) return;
 
-	//Erase overshoot.
 	dx = dx >> 8;
 	dy = dy >> 8;
 	if (x != udx && y != udy) return;
-
+	if (sprites[img].speed < msg.speed) { //Erase overshoot.
+		i = 0;
+		if (udx == x) { while (path[pathn][img].y >> 8 != udy && i < 20) { i++; drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); pathn--; if (pathn < 0) pathn = 240 * 400; } drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); currentPath[img] = pathn; growth[img] += i; return; }
+		else if (udy == y) { while (path[pathn][img].x >> 8 != udx && i < 20) { i++; drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); pathn--; if (pathn < 0) pathn = 240 * 400; } drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); currentPath[img] = pathn; growth[img] += i; return; }
+	} else if (sprites[img].speed > msg.speed) { //draw undershoot
+		i = 0;
+		if (udx == x) { while (y != udy && i < 20) { i++; y += h; drawSprite(x, y, 2, 2, img); pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; } currentPath[img] = pathn; return; }
+		if (udy == y) { while (x != udx && i < 20) { i++; x += w; drawSprite(x, y, 2, 2, img); pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; } currentPath[img] = pathn; return; }
+	}
 	i = 0;
 
 	//Now fill in shortcomings.
@@ -2793,6 +2843,10 @@ void uds_test()
 			}
 			oldCPos = cpos;
 			//if (debugging) myprintf("cpad: %03d %03d %d %f\n",pos.dx,pos.dy, oldMove, dvd);
+			if (debugging && (kDown & KEY_X || kHeld & KEY_X)) {
+				debugHold = true;
+			}
+			if (debugging && kUp & KEY_X) debugHold = false;
 			if (!options[3]) { //A is enabled
 				if (kDown & KEY_A || kHeld & KEY_A) sprites[myNum].speed = 15;
 				else if (kUp & KEY_A) sprites[myNum].speed = 45;
