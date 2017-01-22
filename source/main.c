@@ -895,8 +895,9 @@ eraseLine(int n) {
 	overwriteSprite(path[i][n].x >> 8, path[i][n].y >> 8, 2, 2, 9);
 }
 static int lagMult() {
-	if (num_bikes <= 2) return 1;
-	return (num_bikes - 2);
+	if (num_bikes <= 4) return 1;
+	int r = (num_bikes - 4) / 2;
+	return r > 0 ? r : 1;
 }
 u32 timeDiff(int num) {
 	return (u32)((svcGetSystemTick() - frameTicks[num]) / TICKS_PER_MS / sprites[num].speed);
@@ -1466,17 +1467,310 @@ static void drawLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, int img) {
 	path[pathnum][img].y = y;
 	drawSprite(x >> 8, y >> 8, 2, 2, img);
 }
+static void fixLength(int img) {
+	int oldpathn = pathPos[img];
+	int pathn = currentPath[img];
+	int i = 0;
+	while (getLength(img) <= sprites[img].length + 1 && i < 20) {
+		i++;
+		overwriteSprite(path[oldpathn][img].x >> 8, path[oldpathn][img].y >> 8, 2, 2, img);
+		oldpathn--;
+		if (oldpathn < 0) oldpathn = 240 * 400;
+		pathPos[img] = oldpathn;
+	}
+	currentPath[img] = pathn;
+	pathPos[img] = oldpathn;
+	sprites[img].x = path[currentPath[img]][img].x;
+	sprites[img].y = path[currentPath[img]][img].y;
+}
+static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, int img) {
+	if ((sx >> 8) == (dx >> 8) && (sy >> 8) == (dy >> 8)) {
+		overwriteSprite(sy,dy,2,2,getImg(img));
+		return;
+	}
+	int udx = dx >> 8;
+	int udy = dy >> 8;
+	int x = sx >> 8;
+	int y = sy >> 8;
+	int w = udx - x;
+	int h = udy - y;
+	if (abs(w) > 100 || abs(h) > 100) return;
+
+
+
+	//drawSprite(x >> 8, y >> 8, w, h, img);
+	int pathn = currentPath[img] - 1;
+	if (pathn < 0) pathn = 240 * 400;
+	int prevx = path[pathn][img].x >> 8;
+	int prevy = path[pathn][img].y >> 8;
+	pathn--;
+	if (pathn < 0) pathn = 240 * 400;
+	int prevx2 = path[pathn][img].x >> 8;
+	int prevy2 = path[pathn][img].y >> 8;
+	pathn = currentPath[img];
+	int i = 0;
+	if (x != udx && y != udy) {
+		int tx, ty;
+		if (w < 0) tx = -2;
+		else tx = 2;
+		if (h < 0) ty = -2;
+		else ty = 2;
+		if ((prevx - prevx2 > 0 && w > 0) || (prevx - prevx2 < 0 && w < 0) || (prevy - prevy2 > 0 && h > 0) || (prevy - prevy2 < 0 && h < 0)) {//draw
+			if (x != udx && y != udy) {
+				if (msg.diag || sprites[img].diag) { //they are going diagonal or have been going diagonal...
+					while (path[pathn][img].x >> 8 != udx && path[pathn][img].y >> 8 != udy && i < 20) {
+						i++;
+						drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); //erase the overshoot
+						pathn--;
+						if (pathn < 0) pathn = 240 * 400;
+					}
+					x = path[pathn][img].x >> 8;
+					y = path[pathn][img].y >> 8;
+					//now draw to where they are now
+					if (x == udx) while (y != udy && i < 20) { i++; overwriteSprite(x,y,2,2,img); y += ty; pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; }
+					else if (y == udy) while (x != udx && i < 20) { i++; overwriteSprite(x,y,2,2,img); x += tx; pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; }
+					i = 0;
+					currentPath[img] = pathn;
+				} else { //They are further than where they were, and are not in line with their previous line.
+					if (prevx == prevx2) {
+						while (y != udy && i < 20) { //first branch. draw the y
+							i++;
+							overwriteSprite(x,y,2,2,img);
+							y += ty;
+							pathn++;
+							if (pathn > 240 * 400) pathn = 0;
+							path[pathn][img].x = x << 8;
+							path[pathn][img].y = y << 8;
+						}
+						i = 0;
+						while (x != udx && i < 20) { //second branch. draw the x
+							i++;
+							overwriteSprite(x,y,2,2,img);
+							x += tx;
+							pathn++;
+							if (pathn > 240 * 400) pathn = 0;
+							path[pathn][img].x = x << 8;
+							path[pathn][img].y = y << 8;
+						}
+					} else if (prevy == prevy2) {
+						while (x != udx && i < 20) { //first branch. draw the x
+							i++;
+							overwriteSprite(x,y,2,2,img);
+							x += tx;
+							pathn++;
+							if (pathn > 240 * 400) pathn = 0;
+							path[pathn][img].x = x << 8;
+							path[pathn][img].y = y << 8;
+						}
+						i = 0;
+						while (y != udy && i < 20) { //second branch. draw the y
+							i++;
+							overwriteSprite(x,y,2,2,img);
+							y += ty;
+							pathn++;
+							if (pathn > 240 * 400) pathn = 0;
+							path[pathn][img].x = x << 8;
+							path[pathn][img].y = y << 8;
+						}
+					}
+				}
+				currentPath[img] = pathn;
+				i = 0;
+				sprites[img].x = path[currentPath[img]][img].x;
+				sprites[img].y = path[currentPath[img]][img].y;
+				return;
+			}
+
+		} 
+		else { //erase
+			if (debugging) myprintf("!!!!");
+			if (prevx == prevx2) {
+				while ((path[pathn][img].y >> 8) != udy && i < 20) { i++; drawSprite(path[pathn][img].x >> 8,path[pathn][img].y >> 8,2,2,9); path[pathn][img].x = 0; path[pathn][img].y = 0; pathn--; if (pathn < 0) pathn = 240 * 400; }
+				x = path[pathn][img].x >> 8;
+				y = path[pathn][img].y >> 8;
+				i = 0;
+				overwriteSprite(x,y,2,2,img);
+				while ((path[pathn][img].x >> 8) != udx && i < 20) { i++; x += tx; pathn++; overwriteSprite(x,y,2,2,getAndDecImg(img)); path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0; if (pathn > 240 * 400) pathn = 0; }
+				//if (pathn == currentPath[img]) currentPath[img]++;
+				if (currentPath[img] > 240 * 400) currentPath[img] = 0;
+			}
+			else if (prevy == prevy2) {
+				while ((path[pathn][img].x >> 8) != udx && i < 20) { i++; overwriteSprite(path[pathn][img].x >> 8,path[pathn][img].y >> 8,2,2,9); path[pathn][img].x = 0; path[pathn][img].y = 0; pathn--; if (pathn < 0) pathn = 240 * 400; }
+				x = path[pathn][img].x >> 8;
+				y = path[pathn][img].y >> 8;
+				i = 0;
+				drawSprite(x,y,2,2,img);
+				while ((path[pathn][img].y >> 8) != udy && i < 20) { i++; y += ty; overwriteSprite(x,y,2,2,getAndDecImg(img)); pathn++; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0; if (pathn > 240 * 400) pathn = 0; }
+				//if (pathn == currentPath[img]) currentPath[img]++;
+				if (currentPath[img] > 240 * 400) currentPath[img] = 0;
+			} else if (sprites[img].diag) {
+				if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"%sYEP%s",RED,WHITE); myprintf(mystring); }
+			}
+			overwriteSprite(dx,dy,2,2,getAndDecImg(img));
+		}
+		sprites[img].x = path[currentPath[img]][img].x;
+		sprites[img].y = path[currentPath[img]][img].y;
+	}
+
+
+	if (w == 0) { 
+		if (h < 0) h = -2; 
+		else h = 2; 
+		w = 0; 
+	}
+	else { 
+		h = 0; 
+		if (w < 0) w = -2; 
+		else w = 2; 
+	}
+
+
+	dx = dx >> 8;
+	dy = dy >> 8;
+	if ((udx - x > 0 && sprites[img].dx >> 8 < 0) || (udx - x < 0 && sprites[img].dx >> 8 > 0) || (udy - y < 0 && sprites[img].dy >> 8 > 0) || (udy - y > 0 && sprites[img].dy >> 8 < 0)) { //Erase overshoot.
+		i = 0;
+		if (udx == x) { 
+			if (abs(udy - y) > 2) {
+				while (path[pathn][img].y >> 8 != udy && i < 20) { i++; drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); path[pathn][img].x = 0; path[pathn][img].y = 0; pathn--; if (pathn < 0) pathn = 240 * 400; } 
+				//drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); 
+				i = 0;
+				currentPath[img] = pathn; 
+				//growth[img] += i;
+				int oldpathn = pathPos[img]; //fix the length we removed
+				while (getLength(img) <= sprites[img].length + 1 && i < 20) {
+					i++;
+					overwriteSprite(path[oldpathn][img].x >> 8, path[oldpathn][img].y >> 8, 2, 2, img);
+					oldpathn--;
+					if (oldpathn < 0) oldpathn = 240 * 400;
+					pathPos[img] = oldpathn;
+				}
+				overwriteSprite(udx, udy, 2, 2, img);
+				sprites[img].x = path[currentPath[img]][img].x;
+				sprites[img].y = path[currentPath[img]][img].y;
+				return; 
+			}
+		}
+		else if (udy == y) { 
+			if (abs(udx - x) > 2) {
+				while (path[pathn][img].x >> 8 != udx && i < 20) { i++; drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); path[pathn][img].x = 0; path[pathn][img].y = 0; pathn--; if (pathn < 0) pathn = 240 * 400; } 
+				//drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); 
+				currentPath[img] = pathn; 
+				//growth[img] += i; 
+				i = 0;
+				int oldpathn = pathPos[img]; //fix the length we removed
+				while (getLength(img) <= sprites[img].length + 1 && i < 20) {
+					i++;
+					overwriteSprite(path[oldpathn][img].x >> 8, path[oldpathn][img].y >> 8, 2, 2, img);
+					oldpathn--;
+					if (oldpathn < 0) oldpathn = 240 * 400;
+					pathPos[img] = oldpathn;
+				}
+				overwriteSprite(udx, udy, 2, 2, img);
+				sprites[img].x = path[currentPath[img]][img].x;
+				sprites[img].y = path[currentPath[img]][img].y;
+				return; 
+			}
+		}
+	} else { //draw undershoot
+		i = 0;
+		int oldpathn = pathPos[img];
+		if (udx == x) { 
+			overwriteSprite(x, y, 2, 2, img); 
+			while (y != udy && i < 20) { 
+				i++; 
+				y += h; 
+				overwriteSprite(x, y, 2, 2, img); 
+				overwriteSprite(path[oldpathn][img].x >> 8, path[oldpathn][img].y >> 8, 2, 2, 9); 
+				pathn++; 
+				oldpathn++; 
+				if (pathn > 240 * 400) pathn = 0; 
+				if (oldpathn > 240 * 400) oldpathn = 0; 
+				path[pathn][img].x = x << 8;
+				path[pathn][img].y = y << 8;
+			} 
+			pathPos[img] = oldpathn; 
+			currentPath[img] = pathn; 
+			sprites[img].x = path[currentPath[img]][img].x; 
+			sprites[img].y = path[currentPath[img]][img].y; 
+		}
+		else if (udy == y) { 
+			overwriteSprite(x, y, 2, 2, img); 
+			while (x != udx && i < 20) { 
+				i++; 
+				x += w; 
+				overwriteSprite(x, y, 2, 2, img); 
+				overwriteSprite(path[oldpathn][img].x >> 8, path[oldpathn][img].y >> 8, 2, 2, 9); 
+				pathn++; 
+				oldpathn++; 
+				if (pathn > 240 * 400) pathn = 0; 
+				if (oldpathn > 240 * 400) oldpathn = 0; 
+				path[pathn][img].x = x << 8; 
+				path[pathn][img].y = y << 8; 
+			} 
+			pathPos[img] = oldpathn; 
+			currentPath[img] = pathn; 
+			sprites[img].x = path[currentPath[img]][img].x; 
+			sprites[img].y = path[currentPath[img]][img].y; 
+		}
+	}
+	if (x != udx && y != udy && ((sprites[img].x + sprites[img].dx) >> 8 != udx || (sprites[img].y + sprites[img].dy) >> 8 != udy)) return;
+	i = 0;
+
+	if (w != 0 && h != 0) return;
+	//Now fill in shortcomings.
+	int c = rand() % 9;
+	if (udx == prevx && udy == prevy) {
+		if (debugging) {
+			while (c == img) c = rand() % 9;
+			clearString(); snprintf(mystring,sizeof(mystring),"%s%d .. %d%s",textColors[c],udx,udy,WHITE);
+			myprintf(mystring);
+			drawSprite(sx >> 8,sy >> 8,2,2,c);
+			drawSprite(dx, dy, 2, 2, c);
+		}
+		sprites[img].x = path[currentPath[img]][img].x;
+		sprites[img].y = path[currentPath[img]][img].y;
+		return;
+	}
+	if (debugging) {
+		while (c == img) c = rand() % 9;
+		clearString(); snprintf(mystring,sizeof(mystring),"%sok.%s",textColors[c],WHITE);
+		myprintf(mystring);
+	}
+	//drawSprite(sx,sy,2,2,c);
+	while ((x != dx || y != dy) && (i < 4)) {
+		i++;	
+
+		path[currentPath[img]][img].y = (y << 8);
+		path[currentPath[img]][img].x = (x << 8);
+		overwriteSprite(x, y, 2, 2, getAndDecImg(img));
+		currentPath[img]++;
+		if (currentPath[img] > 240 * 400) currentPath[img] = 0;
+		x += w;
+		
+		y += h;
+		
+	}
+	path[currentPath[img]][img].y = (y << 8);
+	path[currentPath[img]][img].x = (x << 8);
+	sprites[img].x = path[currentPath[img]][img].x;
+	sprites[img].y = path[currentPath[img]][img].y;
+}
 static void eraseOvershoot(Sprite sprite) {
 	int img = sprite.image;
 	int cx = path[currentPath[img]][img].x >> 8;
 	int cy = path[currentPath[img]][img].y >> 8;
 	int udx = sprite.x >> 8;
 	int udy = sprite.y >> 8;
-	if (udx == cx && udy == cy) return;
-	if (udx != cx && udy != cy) return;
-	if ((path[currentPath[img]][img].x + sprites[img].dx) >> 8 == udx && (path[currentPath[img]][img].y + sprites[img].dy) >> 8 == udy) return;
-	snprintf(mystring,sizeof(mystring),"%d %d != %d %d",cx,cy,udx,udy);
-	myprintf(mystring);
+	if (udx == cx && udy == cy) { fixLength(img); return; }
+	if ((path[currentPath[img]][img].x + sprites[img].dx) >> 8 == udx && (path[currentPath[img]][img].y + sprites[img].dy) >> 8 == udy) { finishLine(currentPath[img],sprites[img].x,sprites[img].y,sprite.x,sprite.y,sprite,img); fixLength(img); return; }
+	if ((udx - cx > 0 && sprite.dx > 0) || (udx - cx < 0 && sprite.dx < 0) || (udy - cy < 0 && sprite.dy < 0) || (udy - cy > 0 && sprite.dy > 0)) { 
+		finishLine(currentPath[img],sprites[img].x,sprites[img].y,sprite.x,sprite.y,sprite,img);
+		fixLength(img); 
+		return;
+	}
+	if (udx != cx && udy != cy) { finishLine(currentPath[img],sprites[img].x,sprites[img].y,sprite.x,sprite.y,sprite,img); fixLength(img); return; }
+	/*snprintf(mystring,sizeof(mystring),"%d %d != %d %d",cx,cy,udx,udy);
+	myprintf(mystring);*/
 	int pathn = currentPath[img];
 	int oldpathn = pathPos[img];
 	int i = 0;
@@ -1501,232 +1795,8 @@ static void eraseOvershoot(Sprite sprite) {
 	}
 	currentPath[img] = pathn;
 	pathPos[img] = oldpathn;
-}
-static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, int img) {
-	if ((sx >> 8) == (dx >> 8) && (sy >> 8) == (dy >> 8)) {
-		drawSprite(sy,dy,2,2,getImg(img));
-		return;
-	}
-	int udx = dx >> 8;
-	int udy = dy >> 8;
-	int x = sx >> 8;
-	int y = sy >> 8;
-	int w = udx - x;
-	int h = udy - y;
-	if (abs(w) > 100 || abs(h) > 100) return;
-
-
-
-	//drawSprite(x >> 8, y >> 8, w, h, img);
-	int pathn = currentPath[img] - 1;
-	if (pathn < 0) pathn = 240 * 400;
-	int prevx = path[pathn][img].x >> 8;
-	int prevy = path[pathn][img].y >> 8;
-	pathn--;
-	if (pathn < 0) pathn = 240 * 400;
-	int prevx2 = path[pathn][img].x >> 8;
-	int prevy2 = path[pathn][img].y >> 8;
-	pathn = currentPath[img];
-	int i = 0;
-	if (x != udx && y != udy && (sprites[img].x + sprites[img].dx) >> 8 != udx && (sprites[img].y + sprites[img].dy) >> 8 != udy) {
-		int tx, ty;
-		if (w < 0) tx = -2;
-		else tx = 2;
-		if (h < 0) ty = -2;
-		else ty = 2;
-	
-		if ((prevx - prevx2 > 0 && w > 0) || (prevx - prevx2 < 0 && w < 0) || (prevy - prevy2 > 0 && h > 0) || (prevy - prevy2 < 0 && h < 0)) {//draw
-			if (x != udx && y != udy) {
-				if (msg.diag || sprites[img].diag) { //they are going diagonal or have been going diagonal...
-					while (path[pathn][img].x >> 8 != udx && path[pathn][img].y >> 8 != udy && i < 20) {
-						i++;
-						drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); //erase the overshoot
-						pathn--;
-						if (pathn < 0) pathn = 240 * 400;
-					}
-					x = path[pathn][img].x >> 8;
-					y = path[pathn][img].y >> 8;
-					//now draw to where they are now
-					if (x == udx) while (y != udy && i < 20) { i++; drawSprite(x,y,2,2,img); y += ty; pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; }
-					else if (y == udy) while (x != udx && i < 20) { i++; drawSprite(x,y,2,2,img); x += tx; pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; }
-					i = 0;
-					currentPath[img] = pathn;
-				} else { //They are further than where they were, and are not in line with their previous line.
-					if (prevx == prevx2) {
-						while (y != udy && i < 20) { //first branch. draw the y
-							i++;
-							drawSprite(x,y,2,2,img);
-							y += ty;
-							pathn++;
-							if (pathn > 240 * 400) pathn = 0;
-							path[pathn][img].x = x << 8;
-							path[pathn][img].y = y << 8;
-						}
-						i = 0;
-						while (x != udx && i < 20) { //second branch. draw the x
-							i++;
-							drawSprite(x,y,2,2,img);
-							x += tx;
-							pathn++;
-							if (pathn > 240 * 400) pathn = 0;
-							path[pathn][img].x = x << 8;
-							path[pathn][img].y = y << 8;
-						}
-					} else if (prevy == prevy2) {
-						while (x != udx && i < 20) { //first branch. draw the x
-							i++;
-							drawSprite(x,y,2,2,img);
-							x += tx;
-							pathn++;
-							if (pathn > 240 * 400) pathn = 0;
-							path[pathn][img].x = x << 8;
-							path[pathn][img].y = y << 8;
-						}
-						i = 0;
-						while (y != udy && i < 20) { //second branch. draw the y
-							i++;
-							drawSprite(x,y,2,2,img);
-							y += ty;
-							pathn++;
-							if (pathn > 240 * 400) pathn = 0;
-							path[pathn][img].x = x << 8;
-							path[pathn][img].y = y << 8;
-						}
-					}
-				}
-				currentPath[img] = pathn;
-				i = 0;
-			}
-
-		} 
-		else { //erase
-			if (debugging) myprintf("!!!!");
-			if (prevx == prevx2) {
-				while ((path[pathn][img].y >> 8) != udy && i < 20) { i++; drawSprite(path[pathn][img].x >> 8,path[pathn][img].y >> 8,2,2,9); pathn--; if (pathn < 0) pathn = 240 * 400; }
-				x = path[pathn][img].x >> 8;
-				y = path[pathn][img].y >> 8;
-				i = 0;
-				drawSprite(x,y,2,2,img);
-				while ((path[pathn][img].x >> 8) != udx && i < 20) { i++; x += tx; pathn++; drawSprite(x,y,2,2,getAndDecImg(img)); path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0; if (pathn > 240 * 400) pathn = 0; }
-				//if (pathn == currentPath[img]) currentPath[img]++;
-				if (currentPath[img] > 240 * 400) currentPath[img] = 0;
-			}
-			else if (prevy == prevy2) {
-				while ((path[pathn][img].x >> 8) != udx && i < 20) { i++; drawSprite(path[pathn][img].x >> 8,path[pathn][img].y >> 8,2,2,9); pathn--; if (pathn < 0) pathn = 240 * 400; }
-				x = path[pathn][img].x >> 8;
-				y = path[pathn][img].y >> 8;
-				i = 0;
-				drawSprite(x,y,2,2,img);
-				while ((path[pathn][img].y >> 8) != udy && i < 20) { i++; y += ty; drawSprite(x,y,2,2,getAndDecImg(img)); pathn++; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] > 240 * 400) currentPath[img] = 0; if (pathn > 240 * 400) pathn = 0; }
-				//if (pathn == currentPath[img]) currentPath[img]++;
-				if (currentPath[img] > 240 * 400) currentPath[img] = 0;
-			} else if (sprites[img].diag) {
-				if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"%sYEP%s",RED,WHITE); myprintf(mystring); }
-			}
-			drawSprite(dx,dy,2,2,getAndDecImg(img));
-		}
-		return;
-	}
-
-
-	if (w == 0) { 
-		if (h < 0) h = -2; 
-		else h = 2; 
-		w = 0; 
-	}
-	else { 
-		h = 0; 
-		if (w < 0) w = -2; 
-		else w = 2; 
-	}
-
-	if (w != 0 && h != 0) return;
-
-	dx = dx >> 8;
-	dy = dy >> 8;
-	if (x != udx && y != udy) return;
-	if (sprites[img].speed < msg.speed) { //Erase overshoot.
-		i = 0;
-		if (udx == x) { 
-			if (abs(udy - y) > 2) {
-				while (path[pathn][img].y >> 8 != udy && i < 20) { i++; drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); pathn--; if (pathn < 0) pathn = 240 * 400; } 
-				drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); 
-				i = 0;
-				currentPath[img] = pathn; 
-				//growth[img] += i;
-				int oldpathn = pathPos[img]; //fix the length we removed
-				while (getLength(img) <= sprites[img].length + 1 && i < 20) {
-					i++;
-					overwriteSprite(path[oldpathn][img].x >> 8, path[oldpathn][img].y >> 8, 2, 2, img);
-					oldpathn--;
-					if (oldpathn < 0) oldpathn = 240 * 400;
-					pathPos[img] = oldpathn;
-				}
-				currentPath[img] = pathn;
-				pathPos[img] = oldpathn;
-				return; 
-			}
-		}
-		else if (udy == y) { 
-			if (abs(udx - x) > 2) {
-				while (path[pathn][img].x >> 8 != udx && i < 20) { i++; drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); pathn--; if (pathn < 0) pathn = 240 * 400; } 
-				drawSprite(path[pathn][img].x >> 8, path[pathn][img].y >> 8, 2, 2, 9); 
-				currentPath[img] = pathn; 
-				//growth[img] += i; 
-				i = 0;
-				int oldpathn = pathPos[img]; //fix the length we removed
-				while (getLength(img) <= sprites[img].length + 1 && i < 20) {
-					i++;
-					overwriteSprite(path[oldpathn][img].x >> 8, path[oldpathn][img].y >> 8, 2, 2, img);
-					oldpathn--;
-					if (oldpathn < 0) oldpathn = 240 * 400;
-					pathPos[img] = oldpathn;
-				}
-				currentPath[img] = pathn;
-				pathPos[img] = oldpathn;
-				return; 
-			}
-		}
-	} else if (sprites[img].speed > msg.speed) { //draw undershoot
-		i = 0;
-		if (udx == x) { drawSprite(x, y, 2, 2, img); while (y != udy && i < 20) { i++; y += h; drawSprite(x, y, 2, 2, img); pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; } currentPath[img] = pathn; return; }
-		if (udy == y) { drawSprite(x, y, 2, 2, img); while (x != udx && i < 20) { i++; x += w; drawSprite(x, y, 2, 2, img); pathn++; if (pathn > 240 * 400) pathn = 0; path[pathn][img].x = x << 8; path[pathn][img].y = y << 8; } currentPath[img] = pathn; return; }
-	}
-	i = 0;
-
-	//Now fill in shortcomings.
-	int c = rand() % 9;
-	if (udx == prevx && udy == prevy) {
-		if (debugging) {
-			while (c == img) c = rand() % 9;
-			clearString(); snprintf(mystring,sizeof(mystring),"%s%d .. %d%s",textColors[c],udx,udy,WHITE);
-			myprintf(mystring);
-			drawSprite(sx >> 8,sy >> 8,2,2,c);
-			drawSprite(dx, dy, 2, 2, c);
-		}
-		return;
-	}
-	if (debugging) {
-		while (c == img) c = rand() % 9;
-		clearString(); snprintf(mystring,sizeof(mystring),"%sok.%s",textColors[c],WHITE);
-		myprintf(mystring);
-	}
-	//drawSprite(sx,sy,2,2,c);
-	while ((x != dx || y != dy) && (i < 4)) {
-		i++;	
-
-		path[currentPath[img]][img].y = (y << 8);
-		path[currentPath[img]][img].x = (x << 8);
-		drawSprite(x, y, 2, 2, getAndDecImg(img));
-		currentPath[img]++;
-		if (currentPath[img] > 240 * 400) currentPath[img] = 0;
-		x += w;
-		
-		y += h;
-		
-	}
-	path[currentPath[img]][img].y = (y << 8);
-	path[currentPath[img]][img].x = (x << 8);
+	sprites[img].x = path[currentPath[img]][img].x;
+	sprites[img].y = path[currentPath[img]][img].y;
 }
 static void gameOptions() {
 	myconsoleClear();
@@ -2399,6 +2469,7 @@ void uds_test()
 	memset(quitName,'\0',sizeof(quitName));
 	C3D_TexBind(0, &spritesheet_tex);
 	while (replay) {
+		debugHold = false;
 		errorQuit = 0;
 		if (num_bikes < 1) num_bikes = 1;
 		for (int i = 0; i < num_bikes; i++) {
@@ -2476,7 +2547,6 @@ void uds_test()
 			memset(replyChange,0,sizeof(replyChange[0]) * 10);
 			int load = 0;
 			u64 lastLoad = svcGetSystemTick();
-			debugHold = false;
 			while (redo && num_bikes > 1) {
 				snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sPreparing room...",loading[load]);
 				myprintf(mystring);
@@ -2484,6 +2554,11 @@ void uds_test()
 				if (load > 7) load = 0;
 				keepConsole();
 				for (i = 0; i < num_bikes; i++) {
+					snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sPreparing room...",loading[load]);
+					myprintf(mystring);
+					if (svcGetSystemTick() - lastLoad > TICKS_PER_MS * 30) { load++; lastLoad = svcGetSystemTick(); }
+					if (load > 7) load = 0;
+					keepConsole();
 					gspWaitForVBlank();
 					msg.sprite = sprites[i];
 					UDSResend(replySprite,msg);
@@ -2497,6 +2572,11 @@ void uds_test()
 				msg.sprite.dx = optionsToInt();
 				UDSResend(replyChange,msg);
 				while(aptMainLoop()) {
+					snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sPreparing room...",loading[load]);
+					myprintf(mystring);
+					if (svcGetSystemTick() - lastLoad > TICKS_PER_MS * 30) { load++; lastLoad = svcGetSystemTick(); }
+					if (load > 7) load = 0;
+					keepConsole();
 					hidScanInput();
 					u32 kDown = hidKeysDown();
 					if (kDown & KEY_START) {
@@ -2768,6 +2848,7 @@ void uds_test()
 		for (int i = 0; i < NUM_SPRITES; i++) {
 			erased[i] = false;
 		}
+		bool goDiag = false;
 		while (aptMainLoop()) {
 			totalSpace = 0;
 			for (int i = 0; i < actual_bikes; i++) {
@@ -2856,49 +2937,58 @@ void uds_test()
 				return; // break in order to return to hbmenu
 			}
 			u32 msgtype = NULL;
-			if (!options[2]) { //cpad diagonals are allowed
-				if ((abs(cpos.dy) > 17 || abs(cpos.dx) > 17) && !(oldCPos.dx == 0 && oldCPos.dy == 0)){
-					float dvd = abs(cpos.dy) > abs(cpos.dx) ? abs(cpos.dy) : abs(cpos.dx) / abs(abs(cpos.dy) - abs(cpos.dx));
-					if (dvd < 120 && dvd > 1) {
-						if (cpos.dy > 0 && cpos.dx > 0) {
-							sprites[myNum].diag = NORTHEAST;
-							if (oldMove == MOVE_UP) kDown |= KEY_CPAD_RIGHT;
-							else if (oldMove == MOVE_RIGHT) kDown |= KEY_CPAD_UP;
-							else if (sprites[myNum].dx != 0) kDown |= KEY_CPAD_UP;
-							else kDown |= KEY_CPAD_RIGHT;
-						} else if (cpos.dx < 0 && cpos.dy < 0) {
-							sprites[myNum].diag = SOUTHWEST;
-							if (oldMove == MOVE_DOWN) kDown |= KEY_CPAD_LEFT;
-							else if (oldMove == MOVE_LEFT) kDown |= KEY_CPAD_DOWN;
-							else if (sprites[myNum].dx != 0) kDown |= KEY_CPAD_DOWN;
-							else kDown |= KEY_CPAD_LEFT;
-						} else if (cpos.dx < 0 && cpos.dy > 0) {
-							sprites[myNum].diag = NORTHWEST;
-							if (oldMove == MOVE_UP) kDown |= KEY_CPAD_LEFT;
-							else if (oldMove == MOVE_LEFT) kDown |= KEY_CPAD_UP;
-							else if (sprites[myNum].dx != 0) kDown |= KEY_CPAD_UP;
-							else kDown |= KEY_CPAD_LEFT;
-						} else if (cpos.dx > 0 && cpos.dy < 0) {
-							sprites[myNum].diag = SOUTHEAST;
-							if (oldMove == MOVE_DOWN) kDown = KEY_CPAD_RIGHT;
-							else if (oldMove == MOVE_RIGHT) kDown = KEY_CPAD_DOWN;
-							else if (sprites[myNum].dx != 0) kDown = KEY_CPAD_DOWN;
-							else kDown |= KEY_CPAD_RIGHT;
-						} 
-					} else if (cpos.dx != oldCPos.dx || cpos.dy != oldCPos.dy) {
-						if (cpos.dx < 0 && abs(cpos.dx) > abs(cpos.dy)) { if (oldDiag) msgtype = MOVE_LEFT; kDown |= KEY_CPAD_LEFT; }
-						else if (cpos.dx > 0 && abs(cpos.dx) > abs(cpos.dy)) { if (oldDiag) msgtype = MOVE_RIGHT; kDown |= KEY_CPAD_RIGHT; }
-						else if (cpos.dy < 0 && abs(cpos.dy) > abs(cpos.dx)) { if (oldDiag) msgtype = MOVE_DOWN; kDown |= KEY_CPAD_DOWN; } 
-						else if (cpos.dy > 0 && abs(cpos.dy) > abs(cpos.dx)) { if (oldDiag) msgtype = MOVE_UP; kDown |= KEY_CPAD_UP; }
-						sprites[myNum].diag = 0;
-					}
-				} else if (oldDiag) {
+			float dvd = fabs(cpos.dx) / fabs(cpos.dy);
+			if (fabs(cpos.dy) > fabs(cpos.dx)) dvd = fabs(cpos.dy) / fabs(cpos.dx);
+			if (debugging) {
+				snprintf(mystring,sizeof(mystring),"%d %d %f %f (%f)",cpos.dx,cpos.dy,fabs(cpos.dx),fabs(cpos.dy), dvd);
+				myprintf(mystring);
+			}
+			if (goDiag || ((abs(cpos.dy) > 20 || abs(cpos.dx) > 20) && !(oldCPos.dx == 0 && oldCPos.dy == 0))) {
+				if (dvd < 3.5 && !options[2]) {
+					if (cpos.dy > 0 && cpos.dx > 0) {
+						goDiag = true;
+						sprites[myNum].diag = NORTHEAST;
+						if (oldMove == MOVE_UP) kDown |= KEY_CPAD_RIGHT;
+						else if (oldMove == MOVE_RIGHT) kDown |= KEY_CPAD_UP;
+						else if (sprites[myNum].dx != 0) kDown |= KEY_CPAD_UP;
+						else kDown |= KEY_CPAD_RIGHT;
+					} else if (cpos.dx < 0 && cpos.dy < 0) {
+						goDiag = true;
+						sprites[myNum].diag = SOUTHWEST;
+						if (oldMove == MOVE_DOWN) kDown |= KEY_CPAD_LEFT;
+						else if (oldMove == MOVE_LEFT) kDown |= KEY_CPAD_DOWN;
+						else if (sprites[myNum].dx != 0) kDown |= KEY_CPAD_DOWN;
+						else kDown |= KEY_CPAD_LEFT;
+					} else if (cpos.dx < 0 && cpos.dy > 0) {
+						goDiag = true;
+						sprites[myNum].diag = NORTHWEST;
+						if (oldMove == MOVE_UP) kDown |= KEY_CPAD_LEFT;
+						else if (oldMove == MOVE_LEFT) kDown |= KEY_CPAD_UP;
+						else if (sprites[myNum].dx != 0) kDown |= KEY_CPAD_UP;
+						else kDown |= KEY_CPAD_LEFT;
+					} else if (cpos.dx > 0 && cpos.dy < 0) {
+						goDiag = true;
+						sprites[myNum].diag = SOUTHEAST;
+						if (oldMove == MOVE_DOWN) kDown |= KEY_CPAD_RIGHT;
+						else if (oldMove == MOVE_RIGHT) kDown |= KEY_CPAD_DOWN;
+						else if (sprites[myNum].dx != 0) kDown |= KEY_CPAD_DOWN;
+						else kDown |= KEY_CPAD_RIGHT;
+					} 
+				} else if (((fabs(cpos.dx) > 17 || fabs(cpos.dy) > 17) && (cpos.dx != oldCPos.dx || cpos.dy != oldCPos.dy)) || (!goDiag)) {
+					goDiag = false;
+					if (cpos.dx < 0 && abs(cpos.dx) > abs(cpos.dy)) { if (oldDiag) msgtype = MOVE_LEFT; kDown |= KEY_CPAD_LEFT; }
+					else if (cpos.dx > 0 && abs(cpos.dx) > abs(cpos.dy)) { if (oldDiag) msgtype = MOVE_RIGHT; kDown |= KEY_CPAD_RIGHT; }
+					else if (cpos.dy < 0 && abs(cpos.dy) > abs(cpos.dx)) { if (oldDiag) msgtype = MOVE_DOWN; kDown |= KEY_CPAD_DOWN; } 
+					else if (cpos.dy > 0 && abs(cpos.dy) > abs(cpos.dx)) { if (oldDiag) msgtype = MOVE_UP; kDown |= KEY_CPAD_UP; }
 					sprites[myNum].diag = 0;
-					if (sprites[myNum].dx > 0) msgtype = MOVE_RIGHT;
-					else if (sprites[myNum].dx < 0) msgtype = MOVE_LEFT;
-					else if (sprites[myNum].dy > 0) msgtype = MOVE_UP;
-					else if (sprites[myNum].dy < 0) msgtype = MOVE_DOWN;
 				}
+			} else if (oldDiag) {
+				goDiag = false;
+				sprites[myNum].diag = 0;
+				if (sprites[myNum].dx > 0) msgtype = MOVE_RIGHT;
+				else if (sprites[myNum].dx < 0) msgtype = MOVE_LEFT;
+				else if (sprites[myNum].dy > 0) msgtype = MOVE_UP;
+				else if (sprites[myNum].dy < 0) msgtype = MOVE_DOWN;
 			}
 			oldCPos = cpos;
 			//if (debugging) myprintf("cpad: %03d %03d %d %f\n",pos.dx,pos.dy, oldMove, dvd);
@@ -2916,41 +3006,77 @@ void uds_test()
 			}
 			int prevn = currentPath[myNum] - 1;
 			if (prevn < 0) prevn = 240 * 400;
-			if ((kDown & KEY_CPAD_UP || kDown & KEY_DUP || nextMove == MOVE_UP) && !sprites[myNum].dy) { //they want to move up
-				if (kDown & KEY_DUP) sprites[myNum].diag = 0;
-				if (path[prevn][myNum].x == sprites[myNum].x) nextMove = MOVE_UP;
-				else {
-					sprites[myNum].dx = 0;
-					sprites[myNum].dy = bikeSpeed * -1;
-					msgtype = MOVE_UP;
-					nextMove = NULL;
+			if (goDiag && (kDown & KEY_DUP || kDown & KEY_DDOWN || kDown & KEY_DLEFT || kDown & KEY_DRIGHT)) {
+				goDiag = false;
+				sprites[myNum].diag = 0;
+				nextMove = NULL;
+				if (kDown & KEY_DUP) {
+					if (path[prevn][myNum].x == sprites[myNum].x) nextMove = MOVE_UP;
+					else {
+						sprites[myNum].dx = 0;
+						sprites[myNum].dy = bikeSpeed * -1;
+						msgtype = MOVE_UP;
+					}
+				} else if (kDown & KEY_DDOWN) {
+					if (path[prevn][myNum].x == sprites[myNum].x) nextMove = MOVE_DOWN;
+					else {
+						sprites[myNum].dx = 0;
+						sprites[myNum].dy = bikeSpeed;
+						msgtype = MOVE_DOWN;
+					}
+				} else if(kDown & KEY_DLEFT) {
+					if (path[prevn][myNum].y == sprites[myNum].y) nextMove = MOVE_LEFT;
+					else {
+						sprites[myNum].dx = bikeSpeed * -1;
+						sprites[myNum].dy = 0;
+						msgtype = MOVE_LEFT;
+					}
+				} else if(kDown & KEY_DRIGHT) {
+					if (path[prevn][myNum].y == sprites[myNum].y) nextMove = MOVE_RIGHT;
+					else {
+						sprites[myNum].dx = bikeSpeed;
+						sprites[myNum].dy = 0;
+						msgtype = MOVE_RIGHT;
+					}
 				}
-			} else if((kDown & KEY_CPAD_DOWN || kDown & KEY_DDOWN || nextMove == MOVE_DOWN)  && !sprites[myNum].dy) { //they want to move down
-				if (kDown & KEY_DDOWN) sprites[myNum].diag = 0;
-				if (path[prevn][myNum].x == sprites[myNum].x) nextMove = MOVE_DOWN;
-				else {
-					sprites[myNum].dx = 0;
-					sprites[myNum].dy = bikeSpeed;
-					msgtype = MOVE_DOWN;
-					nextMove = NULL;
-				}
-			} else if ((kDown & KEY_CPAD_LEFT || kDown & KEY_DLEFT || nextMove & MOVE_LEFT)  && !sprites[myNum].dx) { //they want to move left
-				if (kDown & KEY_DLEFT) sprites[myNum].diag = 0;
-				if (path[prevn][myNum].y == sprites[myNum].y) nextMove = MOVE_LEFT;
-				else {
-					sprites[myNum].dx = bikeSpeed * -1;
-					sprites[myNum].dy = 0;
-					msgtype = MOVE_LEFT;
-					nextMove = NULL;
-				}
-			} else if ((kDown & KEY_CPAD_RIGHT || kDown & KEY_DRIGHT || nextMove == MOVE_RIGHT)  && !sprites[myNum].dx) { //they want to move right
-				if (kDown & KEY_DRIGHT) sprites[myNum].diag = 0;
-				if (path[prevn][myNum].y == sprites[myNum].y) nextMove = MOVE_RIGHT;
-				else {
-					sprites[myNum].dx = bikeSpeed;
-					sprites[myNum].dy = 0;
-					msgtype = MOVE_RIGHT;
-					nextMove = NULL;
+			}
+			else {
+				if ((kDown & KEY_CPAD_UP || kDown & KEY_DUP || nextMove == MOVE_UP) && !sprites[myNum].dy) { //they want to move up
+					if (kDown & KEY_DUP) sprites[myNum].diag = 0;
+					if (path[prevn][myNum].x == sprites[myNum].x) nextMove = MOVE_UP;
+					else {
+						sprites[myNum].dx = 0;
+						sprites[myNum].dy = bikeSpeed * -1;
+						msgtype = MOVE_UP;
+						nextMove = NULL;
+					}
+				} else if((kDown & KEY_CPAD_DOWN || kDown & KEY_DDOWN || nextMove == MOVE_DOWN)  && !sprites[myNum].dy) { //they want to move down
+					if (kDown & KEY_DDOWN) sprites[myNum].diag = 0;
+					if (path[prevn][myNum].x == sprites[myNum].x) nextMove = MOVE_DOWN;
+					else {
+						sprites[myNum].dx = 0;
+						sprites[myNum].dy = bikeSpeed;
+						msgtype = MOVE_DOWN;
+						nextMove = NULL;
+					}
+				} else if ((kDown & KEY_CPAD_LEFT || kDown & KEY_DLEFT || nextMove & MOVE_LEFT)  && !sprites[myNum].dx) { //they want to move left
+					if (kDown & KEY_DLEFT) sprites[myNum].diag = 0;
+					if (path[prevn][myNum].y == sprites[myNum].y) nextMove = MOVE_LEFT;
+					else {
+						sprites[myNum].dx = bikeSpeed * -1;
+						sprites[myNum].dy = 0;
+						msgtype = MOVE_LEFT;
+						nextMove = NULL;
+					}
+				} else if ((kDown & KEY_CPAD_RIGHT || kDown & KEY_DRIGHT || nextMove == MOVE_RIGHT)  && !sprites[myNum].dx) { //they want to move right
+					if (kDown & KEY_DRIGHT) sprites[myNum].diag = 0;
+					if (path[prevn][myNum].y == sprites[myNum].y) nextMove = MOVE_RIGHT;
+					else {
+						sprites[myNum].dx = bikeSpeed;
+						sprites[myNum].dy = 0;
+						msgtype = MOVE_RIGHT;
+						nextMove = NULL;
+					}
 				}
 			}
 			if (msgtype != NULL || oldDx != sprites[myNum].speed) { //there has been some kind of change, lets send an update
@@ -3172,16 +3298,12 @@ void uds_test()
 							if (sprites[img].forwards == msg.sprite.forwards) if (msg.sprite.image < actual_bikes && msg.sender == msg.sprite.image) {
 								
 								if (abs(currentPath[img] - pathPos[img]) > 4) {
-									u32 pathx = path[currentPath[img]][img].x >> 8;
-									u32 pathy = path[currentPath[img]][img].y >> 8;
-									u32 imgx = msg.sprite.x >> 8;
-									u32 imgy = msg.sprite.y >> 8; 
 									
 									if (msg.sprite.dead) {
 										lastDead = msg.sprite.image;
 										eraseOvershoot(msg.sprite);
 									}
-									else finishLine(currentPath[img],pathx << 8, pathy << 8, imgx << 8, imgy << 8, msg.sprite, img);
+									else finishLine(currentPath[img],sprites[img].x, sprites[img].y, msg.sprite.x, msg.sprite.y, msg.sprite, img);
 								}
 							}
 							//this is definitely a message of movement change
