@@ -261,7 +261,7 @@ typedef struct path_s {
 }Path;
 
 Path path[400 * 240][10];
-Path openSet[400 * 240];
+Path *openSet = NULL;
 Path cameFrom[401][241];
 Path totalPath[400 * 240];
 int totalPathN = 0;
@@ -818,23 +818,7 @@ void writeColor(int x, int y, u32 color) {
 	frameBuf[offset + 1] = color >> 8;
 	frameBuf[offset + 2] = color >> 16;
 }
-void addOpenSet(int x, int y) {
-	openSet[openSetN].x = x;
-	openSet[openSetN].y = y;
-	openSetN++;
-}
-void remOpenSet(int x, int y) {
-	for (int i = 0; i < openSetN; i++) {
-		if (openSet[i].x == x && openSet[i].y == y) {
-			for (int k = i; k < openSetN; k++) {
-				openSet[k].x = openSet[k + 1].x;
-				openSet[k].y = openSet[k + 1].y;
-			}
-			openSetN--;
-			return;
-		}
-	}
-}
+
 void addPlacesIMoved(int x, int y) {
 	placesIMoved[placesIMovedN].x = x;
 	placesIMoved[placesIMovedN].y = y;
@@ -880,11 +864,67 @@ bool inClosedSet(int x, int y) {
 	}
 	return false;
 }
-bool inOpenSet(int x, int y) {
-	for (int i = 0; i < openSetN; i++) {
-		if (openSet[i].x == x && openSet[i].y == y) return true;
-	}
-	return false;
+int inOpenSet(int x, int y) {
+	Path * c = openSet;
+    while (c) {
+    	if (c->x == x && c->y == y) return 1;
+		c = c->next;
+    }
+	return 0;
+}
+void addOpenSet(int x, int y) {
+	Path * newNode;
+	newNode = malloc(sizeof(Path));
+	newNode->x = x;
+	newNode->y = y;
+	if (openSetN > 0) newNode->next = openSet;
+	else newNode->next = NULL;
+	openSet = newNode;
+    openSetN++;
+}
+void clearOpenSet() {
+	if (openSetN == 0) return;
+    Path * c;
+    Path * temp;
+    c = openSet;
+    while (c->next) {
+    	temp = c;
+        c = c->next;
+        free(temp);
+    }
+    free(c);
+    openSetN = 0;
+}
+void remOpenSet(int x, int y) {
+	if (openSetN < 0) return;
+    Path * c;
+    Path * prev;
+    c = openSet;
+    if (c->x == x && c->y == y) {
+    	Path * temp;
+        temp = c->next;
+        free(c);
+        openSet = temp;
+        openSetN--;
+        return;
+    }
+    while (c->next) {
+        prev = c;
+        c = c->next;
+        if (c->x == x && c->y == y) break;
+    }
+    if (c->x != x || c->y != y) return;
+    prev->next = c->next;
+    free(c);
+    openSetN--;
+}
+void print_list() {
+    Path * current = openSet;
+
+    while (current != NULL) {
+        printf("%d %d\n", current->x, current->y);
+        current = current->next;
+    }
 }
 int getDist(int x, int y, int dx, int dy) {
 	if (!options[0]) {
@@ -975,15 +1015,17 @@ int getDirectionToApple(int s) {
 }
 void setCurrentF() {
 	int smallest = INT_MAX;
-	for (int i = openSetN - 1; i >= 0; i--) {
-		if (fscore[openSet[i].x][openSet[i].y] != 1 && fscore[openSet[i].x][openSet[i].y] < smallest) {
-			smallest = fscore[openSet[i].x][openSet[i].y];
-			current.x = openSet[i].x;
-			current.y = openSet[i].y;
+	Path * c = openSet;
+	while (c) {
+		if (fscore[c->x][c->y] != 1 && fscore[c->x][c->y] < smallest) {
+			smallest = fscore[c->x][c->y];
+			current.x = c->x;
+			current.y = c->y;
 		}
+		c = c->next;
 	}
 }
-void setCurrentF2() {
+/*void setCurrentF2() {
 	int smallest = INT_MAX;
 	for (int i = 0; i < openSetN; i++) {
 		if (fscore[openSet[i].x][openSet[i].y] != 1 && fscore[openSet[i].x][openSet[i].y] < smallest) {
@@ -992,7 +1034,7 @@ void setCurrentF2() {
 			current.y = openSet[i].y;
 		}
 	}
-}
+}*/
 bool haveDirection() {
 	for (int i = 0; i < 4; i++) {
 		if (directions[i]) return true;
@@ -1027,14 +1069,12 @@ static int UDSSend(Message msg) {
 int getMoveableRange(int s) {
 	if (s >= actual_bikes) return 40;
 	memset(closedSet,0,sizeof(closedSet[0]) * 400 * 240);
-	memset(openSet,0,sizeof(openSet[0]) * 400 * 240);
+	clearOpenSet();
 	memset(gscore,1,sizeof(gscore[0][0]) * 401 * 241);
 	memset(fscore,1,sizeof(fscore[0][0]) * 401 * 241);
 	int x = sprites[s].x >> 8;
 	int y = sprites[s].y >> 8;
-	openSet[0].x = sprites[s].x >> 8;
-	openSet[0].y = sprites[s].y >> 8;
-	openSetN = 1;
+	addOpenSet(x,y);
 	closedSetN = 0;
 	gscore[x][y] = 0;
 	fscore[x][y] = getDist(x,y,sprites[s].x >> 8,sprites[s].y >> 8);
@@ -1088,14 +1128,12 @@ void getMoveableRangeApple(int s) {
 	if (s >= actual_bikes) return;
 	u64 startPath = svcGetSystemTick();
 	memset(closedSet,0,sizeof(closedSet[0]) * 400 * 240);
-	memset(openSet,0,sizeof(openSet[0]) * 400 * 240);
+	clearOpenSet();
 	memset(gscore,1,sizeof(gscore[0][0]) * 401 * 241);
 	memset(fscore,1,sizeof(fscore[0][0]) * 401 * 241);
 	int x = sprites[s].x >> 8;
 	int y = sprites[s].y >> 8;
-	openSet[0].x = sprites[s].x >> 8;
-	openSet[0].y = sprites[s].y >> 8;
-	openSetN = 1;
+	addOpenSet(x,y);
 	closedSetN = 0;
 	gscore[x][y] = 0;
 	fscore[x][y] = getDist(x,y,sprites[s].x >> 8,sprites[s].y >> 8);
@@ -1128,7 +1166,7 @@ void getMoveableRangeApple(int s) {
 		}
 		//keepConsole();
 		i++;
-		setCurrentF2();
+		setCurrentF();
 
 		/*C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target);
@@ -1438,16 +1476,14 @@ void plotCourse(int s) {
 	previousSteps = 0;
 	placesIMovedN = 0;
 	memset(closedSet,0,sizeof(closedSet[0]) * 400 * 240);
-	memset(openSet,0,sizeof(openSet[0]) * 400 * 240);
+	clearOpenSet();
 	memset(cameFrom,0,sizeof(cameFrom[0][0]) * 401 * 241);
 	memset(totalPath,0,sizeof(totalPath[0]) * 400 * 240);
 	memset(gscore,1,sizeof(gscore[0][0]) * 401 * 241);
 	memset(fscore,1,sizeof(fscore[0][0]) * 401 * 241);
 	int x = sprites[s].x >> 8;
 	int y = sprites[s].y >> 8;
-	openSet[0].x = sprites[s].x >> 8;
-	openSet[0].y = sprites[s].y >> 8;
-	openSetN = 1;
+	addOpenSet(x,y);
 	closedSetN = 0;
 	gscore[x][y] = 2;
 	fscore[x][y] = getDist(x,y,apple.x >> 8,apple.y >> 8);
@@ -1521,14 +1557,12 @@ bool pathfindToApple(int s) {
 	if (s >= actual_bikes) return false;
 	u64 startPathFind = svcGetSystemTick();
 	memset(closedSet,0,sizeof(closedSet[0]) * 400 * 240);
-	memset(openSet,0,sizeof(openSet[0]) * 400 * 240);
+	clearOpenSet();
 	memset(gscore,1,sizeof(gscore[0][0]) * 400 * 240);
 	memset(fscore,1,sizeof(fscore[0][0]) * 400 * 240);
 	int x = apple.x >> 8;
 	int y = apple.y >> 8;
-	openSet[0].x = apple.x >> 8;
-	openSet[0].y = apple.y >> 8;
-	openSetN = 1;
+	addOpenSet(x,y);
 	closedSetN = 0;
 	gscore[x][y] = 0;
 	fscore[x][y] = getDist(x,y,sprites[s].x >> 8,sprites[s].y >> 8);
