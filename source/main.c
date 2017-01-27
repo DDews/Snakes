@@ -3020,8 +3020,8 @@ static void moveSprites() {
 					else if (myy == -2) { sprites[myNum].dx = 0; sprites[myNum].dy = -1 * bikeSpeed; }
 				}
 				else {
-					snprintf(mystring,sizeof(mystring),"myx: %d myy: %d",myx,myy);
-					myprintf(mystring);
+					/*snprintf(mystring,sizeof(mystring),"myx: %d myy: %d",myx,myy);
+					myprintf(mystring);*/
 					plotting = false;
 					totalPathN = 0;
 				}
@@ -3193,8 +3193,8 @@ static void moveSprites() {
 			ody = dy;
 			dx = sprites[i].dx >> 8;
 			dy = sprites[i].dy >> 8;
-			snprintf(mystring,sizeof(mystring),"dx: %d dy: %d odx: %d ody: %d",dx,dy,odx,ody);
-			myprintf(mystring);
+			/*snprintf(mystring,sizeof(mystring),"dx: %d dy: %d odx: %d ody: %d",dx,dy,odx,ody);
+			myprintf(mystring);*/
 			if (odx != dx || ody != dy) { //we are taking a turn, so we need to fix the corner's cameFrom.
 				if (dx == 0) {
 					cameFrom[sanitizeX(x + odx)][sanitizeY(y - dy)].x = sanitizeX(x + odx);
