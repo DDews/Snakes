@@ -1279,8 +1279,8 @@ bool isCameFrom(int x, int y) {
 	return (cameFrom[x][y].x || cameFrom[x][y].y);
 }
 void showCameFrom() {
-	snprintf(mystring,sizeof(mystring),"totalpathn: %d",totalPathN);
-	myprintf(mystring);
+	/*snprintf(mystring,sizeof(mystring),"totalpathn: %d",totalPathN);
+	myprintf(mystring);*/
 	float px = 0;
 	float py = 0;
 	float oldpx = 0;
@@ -1401,7 +1401,7 @@ bool isAPlaceIMoved(int x, int y) {
 void showPlotMovement(int s) {
 	plotting = true;
 	if (totalPathN > 10) return;
-	myprintf("calculating...");
+	/*myprintf("calculating...");*/
 	getFarthestCurrent(s);
 	int tempx;
 	int tempy;
@@ -1437,11 +1437,11 @@ void showPlotMovement(int s) {
 	}
 	if (totalPathN >= 240 * 400) {
 		bool isGone = (current.x == 0 && current.y == 0);
-		snprintf(mystring,sizeof(mystring),"wtf.. %d",isGone);
-		myprintf(mystring);
+		/*snprintf(mystring,sizeof(mystring),"wtf.. %d",isGone);
+		myprintf(mystring);*/
 	}
-	snprintf(mystring,sizeof(mystring),"totalpathn: %d",totalPathN);
-	myprintf(mystring);
+	/*snprintf(mystring,sizeof(mystring),"totalpathn: %d",totalPathN);
+	myprintf(mystring);*/
 }
 void showPathToApple(int s) {
 	plotting = false;
@@ -1480,13 +1480,13 @@ void showPathToApple(int s) {
 	}
 	if (totalPathN >= 240 * 400) {
 		bool isGone = (current.x == 0 && current.y == 0);
-		snprintf(mystring,sizeof(mystring),"wtf.. %d",isGone);
-		myprintf(mystring);
+		/*snprintf(mystring,sizeof(mystring),"wtf.. %d",isGone);
+		myprintf(mystring);*/
 		totalPathN = 0;
 		plotting = false;
 	}
-	snprintf(mystring,sizeof(mystring),"totalPathN: %d",totalPathN);
-	myprintf(mystring);
+	/*snprintf(mystring,sizeof(mystring),"totalPathN: %d",totalPathN);
+	myprintf(mystring);*/
 	/*while (aptMainLoop()) {
 		keepConsole();
 		hidScanInput();
@@ -1593,7 +1593,7 @@ void continuePlotting(int s) {
 }
 void plotCourse(int s) {
 	plotting = false;
-	myprintf("plotcourse()");
+	/*myprintf("plotcourse()");*/
 	previousSteps = 0;
 	placesIMovedN = 0;
 	clearClosedSet();
@@ -1767,7 +1767,7 @@ void drawSprite( int x, int y, int width, int height, int image ) {
 	if (image != 9) {
 		for (int i = totalPathN - 3; i >= 0; i--) {
 			if (abs(x - totalPath[i].x) <= 2 && abs(y - totalPath[i].y) <= 2) {
-				myprintf("yep");
+				/*myprintf("yep");*/
 				plotting = false;
 				totalPathN = 0;
 				break;
@@ -1813,7 +1813,7 @@ void overwriteSprite( int x, int y, int width, int height, int image ) {
 	if (image != 9) {
 		for (int i = totalPathN - 3; i >= 0; i--) {
 			if (abs(x - totalPath[i].x) <= 2 && abs(y - totalPath[i].y) <= 2) {
-				myprintf("yep");
+				/*myprintf("yep");*/
 				plotting = false;
 				totalPathN = 0;
 				break;
@@ -3356,10 +3356,12 @@ static void sceneRender(void) {
 		int y = path[pathPos[i]][i].y >> 8;
 		if (autoPilot && !inOpenSet(x,y)) {
 			for (int k = 4; k < 8; k++) {
-				if (cameFrom[getDirectionXTo(k,x,myNum)][getDirectionYTo(k,y,myNum)].x && cameFrom[getDirectionXTo(k,x,myNum)][getDirectionYTo(k,y,myNum)].y) {
+				int nx = getDirectionXTo(k,x,myNum);
+				int ny = getDirectionYTo(k,y,myNum);
+				if (!getColor(nx,ny) && cameFrom[nx][ny].x && cameFrom[nx][ny].y) {
 					addOpenSet(x,y);
-					cameFrom[x][y].x = getDirectionXTo(k,x,myNum);
-					cameFrom[x][y].y = getDirectionYTo(k,y,myNum);
+					cameFrom[x][y].x = nx;
+					cameFrom[x][y].y = ny;
 					break;
 				}
 			}
@@ -4687,7 +4689,6 @@ void uds_test()
 								if (allReplied(replyChange)) memset(replyChange,1,sizeof(replyChange[0]) * 10); 
 								num_bikes++; 
 								if (sprites[myNum].dead) { 
-									myprintf("wtf...");
 									sprites[myNum].image = myNum; 
 									sprites[myNum].node = myNode; 
 									msg.sprite = sprites[myNum]; 
