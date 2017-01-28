@@ -2431,6 +2431,7 @@ static void printScore() {
 		if (actual_bikes == 1) {
 			snprintf(mystring,sizeof(mystring),"\x1b[2;0HPress %s%s to forfeit.",RED,WHITE);
 			myprintf(mystring);
+			myprintf("\x1b[3;0H");
 		}
 	}
 	if (!options[5]) {
