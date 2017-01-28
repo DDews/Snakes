@@ -74,7 +74,7 @@
 	GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO))
 
 #define NUM_SPRITES 10
-
+#define numBots 2
 
 #define SAMPLERATE 22050
 #define SAMPLESPERBUF (SAMPLERATE / 30)
@@ -86,8 +86,8 @@ typedef struct { float position[3]; float texcoord[2]; } textVertex_s;
 static C3D_Tex* glyphSheets;
 static textVertex_s* textVtxArray;
 static int textVtxArrayPos = 0;
-
-bool plotting = false;
+int currentBots = numBots;
+bool plotting[numBots] = {false,false};
 int epsilon = 1;
 int oldBotSpeed = 45;
 u32 highScore = 0;
@@ -121,6 +121,7 @@ int totalSpace = 0;
 int lastDead = 0;
 char mystring[200];
 bool cheats = false;
+bool forfeit = false;
 float oldpx = 0;
 float oldpy = 0;
 int diag = 0;
@@ -263,18 +264,20 @@ typedef struct path_s {
 }Path;
 
 Path path[400 * 240][10];
-Path *openSet = NULL;
-Path cameFrom[401][241];
-Path totalPath[401 * 241];
-int totalPathN = 0;
-int openSetN = 0;
+
+//autopilot and ai
+Path *openSet[numBots];
+Path cameFrom[numBots][401][241];
+Path totalPath[numBots][401 * 241];
+int totalPathN[numBots] = {0,0};
+int openSetN[numBots] = {0,0};
 Path placesIMoved[400 * 240];
 int placesIMovedN = 0;
-Path *closedSet;
-int closedSetN = 0;
+Path *closedSet[numBots];
+int closedSetN[numBots] = {0,0};
 int previousSteps = 0;
-int gscore[401][241];
-int fscore[401][241];
+int gscore[numBots][401][241];
+int fscore[numBots][401][241];
 
 typedef struct {
 	int x, y;
@@ -355,6 +358,20 @@ setOptions(unsigned int n) {
 	  options[i] = n & 1;
 	  n /= 2;
 	}
+}
+
+int numPlayers() {
+	if (actual_bikes > 1) return actual_bikes;
+	return actual_bikes + currentBots - 1;
+}
+int toBot(int s) {
+	if (autoPilot && s == myNum) return 0;
+	if (s > currentBots) return 0;
+	return s;
+}
+int getBot(int s) {
+	if (s == 0) return myNum;
+	return s;
 }
 
 static void screen_get_string_size_internal(float* width, float* height, const char* text, float scaleX, float scaleY, bool oneLine, bool wrap, float wrapX) {
@@ -584,7 +601,7 @@ myprintf(const char *format, ...) {
 	if (consolei < 15) consolei += 1;
 	return;
 }
-Path current;
+Path current[2];
 void util_free_path_utf8(FS_Path* path) {
     free((void*) path->data);
     free(path);
@@ -826,22 +843,22 @@ void addPlacesIMoved(int x, int y) {
 	placesIMoved[placesIMovedN].y = y;
 	placesIMovedN++;
 }
-void addClosedSet(int x, int y) {
+void addClosedSet(int x, int y, int s) {
 	Path * newNode;
 	newNode = malloc(sizeof(Path));
 	if (!newNode) return;
 	newNode->x = x;
 	newNode->y = y;
-	if (closedSetN > 0) newNode->next = closedSet;
+	if (closedSetN[s] > 0) newNode->next = closedSet[s];
 	else newNode->next = NULL;
-	closedSet = newNode;
-    closedSetN++;
+	closedSet[s] = newNode;
+    closedSetN[s]++;
 }
-void clearClosedSet() {
-	if (closedSetN == 0) return;
+void clearClosedSet(int s) {
+	if (closedSetN[s] == 0) return;
     Path * c;
     Path * temp;
-    c = closedSet;
+    c = closedSet[s];
     if (!c) return;
     while (c->next) {
     	temp = c;
@@ -849,21 +866,21 @@ void clearClosedSet() {
         free(temp);
     }
     free(c);
-    closedSet = NULL;
-    closedSetN = 0;
+    closedSet[s] = NULL;
+    closedSetN[s] = 0;
 }
-void remClosedSet(int x, int y) {
-	if (closedSetN <= 0) return;
+void remClosedSet(int x, int y, int s) {
+	if (closedSetN[s] <= 0) return;
     Path * c;
     Path * prev;
-    c = closedSet;
+    c = closedSet[s];
     if (!c) return;
     if (c->x == x && c->y == y) {
     	Path * temp;
         temp = c->next;
         free(c);
-        closedSet = temp;
-        closedSetN--;
+        closedSet[s] = temp;
+        closedSetN[s]--;
         return;
     }
     while (c->next) {
@@ -874,11 +891,11 @@ void remClosedSet(int x, int y) {
     if (c->x != x || c->y != y) return;
     prev->next = c->next;
     free(c);
-    closedSetN--;
-    if (closedSetN <= 0) closedSet = NULL;
+    closedSetN[s]--;
+    if (closedSetN[s] <= 0) closedSet[s] = NULL;
 }
-bool openSetNotEmpty() {
-	return openSetN != 0;
+bool openSetNotEmpty(int s) {
+	return openSetN[s] != 0;
 }
 int sanitizeX(int x) {
 	if (x < 2) return 396;
@@ -896,38 +913,38 @@ int sanitizeY(int y) {
 	else if (y < 0) return 238;
 	return y;*/
 }
-bool inClosedSet(int x, int y) {
-	Path * c = closedSet;
+bool inClosedSet(int x, int y, int s) {
+	Path * c = closedSet[s];
     while (c) {
     	if (c->x == x && c->y == y) return true;
 		c = c->next;
     }
 	return false;
 }
-bool inOpenSet(int x, int y) {
-	Path * c = openSet;
+bool inOpenSet(int x, int y, int s) {
+	Path * c = openSet[s];
     while (c) {
     	if (c->x == x && c->y == y) return true;
 		c = c->next;
     }
 	return false;
 }
-void addOpenSet(int x, int y) {
+void addOpenSet(int x, int y, int s) {
 	Path * newNode;
 	newNode = malloc(sizeof(Path));
 	if (!newNode) return;
 	newNode->x = x;
 	newNode->y = y;
-	if (openSetN > 0) newNode->next = openSet;
+	if (openSetN[s] > 0) newNode->next = openSet[s];
 	else newNode->next = NULL;
-	openSet = newNode;
-    openSetN++;
+	openSet[s] = newNode;
+    openSetN[s]++;
 }
-void clearOpenSet() {
-	if (openSetN == 0) return;
+void clearOpenSet(int s) {
+	if (openSetN[s] == 0) return;
     Path * c;
     Path * temp;
-    c = openSet;
+    c = openSet[s];
     if (!c) return;
     while (c->next) {
     	temp = c;
@@ -935,21 +952,21 @@ void clearOpenSet() {
         free(temp);
     }
     free(c);
-    openSet = NULL;
-    openSetN = 0;
+    openSet[s] = NULL;
+    openSetN[s] = 0;
 }
-void remOpenSet(int x, int y) {
-	if (openSetN <= 0) return;
+void remOpenSet(int x, int y, int s) {
+	if (openSetN[s] <= 0) return;
     Path * c;
     Path * prev;
-    c = openSet;
+    c = openSet[s];
     if (!c) return;
     if (c->x == x && c->y == y) {
     	Path * temp;
         temp = c->next;
         free(c);
-        openSet = temp;
-        openSetN--;
+        openSet[s] = temp;
+        openSetN[s]--;
         return;
     }
     while (c->next) {
@@ -960,8 +977,8 @@ void remOpenSet(int x, int y) {
     if (c->x != x || c->y != y) return;
     prev->next = c->next;
     free(c);
-    openSetN--;
-    if (openSetN <= 0) openSet = NULL;
+    openSetN[s]--;
+    if (openSetN[s] <= 0) openSet[s] = NULL;
 }
 int getDist(int x, int y, int dx, int dy) {
 	if (!options[0]) {
@@ -984,31 +1001,32 @@ int getDist(int x, int y, int dx, int dy) {
 	return abs(dx - x) + abs(dy - y);
 }
 void addNode(int x, int y, int nx, int ny, int myGScore, int s) {
-	gscore[nx][ny] = myGScore;
-	fscore[nx][ny] = myGScore + getDist(nx,ny,sprites[s].x >> 8,sprites[s].y >> 8) * epsilon;
+	int ac = getBot(s);
+	gscore[s][nx][ny] = myGScore;
+	fscore[s][nx][ny] = myGScore + getDist(nx,ny,sprites[ac].x >> 8,sprites[ac].y >> 8) * epsilon;
 }
 void addNodeToApple(int x, int y, int nx, int ny, int myGScore, int s) {
-	cameFrom[nx][ny].x = x;
-	cameFrom[nx][ny].y = y;
-	gscore[nx][ny] = myGScore;
-	fscore[nx][ny] = myGScore + getDist(nx,ny,apple.x >> 8,apple.y >> 8) * epsilon;
+	cameFrom[s][nx][ny].x = x;
+	cameFrom[s][nx][ny].y = y;
+	gscore[s][nx][ny] = myGScore;
+	fscore[s][nx][ny] = myGScore + getDist(nx,ny,apple.x >> 8,apple.y >> 8) * epsilon;
 }
 void continueAddNodeToApple(int x, int y, int nx, int ny, int myGScore, int s) {
-	cameFrom[nx][ny].x = x;
-	cameFrom[nx][ny].y = y;
-	gscore[nx][ny] = myGScore;
-	fscore[nx][ny] = myGScore + getDist(nx,ny,apple.x >> 8,apple.y >> 8) * epsilon;
+	cameFrom[s][nx][ny].x = x;
+	cameFrom[s][nx][ny].y = y;
+	gscore[s][nx][ny] = myGScore;
+	fscore[s][nx][ny] = myGScore + getDist(nx,ny,apple.x >> 8,apple.y >> 8) * epsilon;
 }
 bool directions[4] = {false,false,false,false};
-int getDirectionY(int i) {
-	if (i == 0) return sanitizeY(current.y - 2);
-	else if (i == 1) return sanitizeY(current.y + 2);
-	return sanitizeY(current.y);
+int getDirectionY(int i, int s) {
+	if (i == 0) return sanitizeY(current[s].y - 2);
+	else if (i == 1) return sanitizeY(current[s].y + 2);
+	return sanitizeY(current[s].y);
 }
-int getDirectionX(int i) {
-	if (i == 2) return sanitizeX(current.x - 2);
-	else if (i == 3) return sanitizeX(current.x + 2);
-	return sanitizeX(current.x);
+int getDirectionX(int i, int s) {
+	if (i == 2) return sanitizeX(current[s].x - 2);
+	else if (i == 3) return sanitizeX(current[s].x + 2);
+	return sanitizeX(current[s].x);
 }
 int getDirectionYTo(int i, int y, int s) {
 	if (i == 0) return sanitizeY(y - 2);
@@ -1029,11 +1047,12 @@ int getDirectionXTo(int i, int x, int s) {
 	return sanitizeX(x);
 }
 int getDirection(int s) {
+	int ac = getBot(s);
 	int r = 0;
 	int smallest = INT_MAX;
 	for (int i = 0; i < 4; i++) {
-		if (directions[i] && getDist(getDirectionX(i), getDirectionY(i),sprites[s].x >> 8, sprites[s].y >> 8) * epsilon < smallest) {
-			smallest = getDist(getDirectionX(i),getDirectionY(i),sprites[s].x >> 8, sprites[s].y >> 8) * epsilon;
+		if (directions[i] && getDist(getDirectionX(i,s), getDirectionY(i,s),sprites[ac].x >> 8, sprites[ac].y >> 8) * epsilon < smallest) {
+			smallest = getDist(getDirectionX(i,s),getDirectionY(i,s),sprites[ac].x >> 8, sprites[ac].y >> 8) * epsilon;
 			r = i;
 		}
 	}
@@ -1043,32 +1062,32 @@ int getDirectionToApple(int s) {
 	int r = 0;
 	int smallest = INT_MAX;
 	for (int i = 0; i < 4; i++) {
-		if (directions[i] && getDist(getDirectionX(i), getDirectionY(i),apple.x >> 8, apple.y >> 8) * epsilon < smallest) {
-			smallest = getDist(getDirectionX(i),getDirectionY(i),apple.x >> 8, apple.y >> 8) * epsilon;
+		if (directions[i] && getDist(getDirectionX(i,s), getDirectionY(i,s),apple.x >> 8, apple.y >> 8) * epsilon < smallest) {
+			smallest = getDist(getDirectionX(i,s),getDirectionY(i,s),apple.x >> 8, apple.y >> 8) * epsilon;
 			r = i;
 		}
 	}
 	return r;
 }
-void setCurrentF() {
+void setCurrentF(int s) {
 	int smallest = INT_MAX;
-	Path * c = openSet;
+	Path * c = openSet[s];
 	while (c) {
-		if (fscore[c->x][c->y] != 1 && fscore[c->x][c->y] < smallest) {
-			smallest = fscore[c->x][c->y];
-			current.x = c->x;
-			current.y = c->y;
+		if (fscore[s][c->x][c->y] != 1 && fscore[s][c->x][c->y] < smallest) {
+			smallest = fscore[s][c->x][c->y];
+			current[s].x = c->x;
+			current[s].y = c->y;
 		}
 		c = c->next;
 	}
 }
 /*void setCurrentF2() {
 	int smallest = INT_MAX;
-	for (int i = 0; i < openSetN; i++) {
+	for (int i = 0; i < openSetN[s]; i++) {
 		if (fscore[openSet[i].x][openSet[i].y] != 1 && fscore[openSet[i].x][openSet[i].y] < smallest) {
 			smallest = fscore[openSet[i].x][openSet[i].y];
-			current.x = openSet[i].x;
-			current.y = openSet[i].y;
+			current[s].x = openSet[i].x;
+			current[s].y = openSet[i].y;
 		}
 	}
 }*/
@@ -1104,53 +1123,53 @@ static int UDSSend(Message msg) {
 	return 0;
 }
 int getMoveableRange(int s) {
-	if (s >= actual_bikes) return 40;
-	clearClosedSet();
-	clearOpenSet();
-	memset(gscore,1,sizeof(gscore[0][0]) * 401 * 241);
-	memset(fscore,1,sizeof(fscore[0][0]) * 401 * 241);
+	if (s >= numPlayers()) return 40;
+	clearClosedSet(s);
+	clearOpenSet(s);
+	memset(gscore[s],1,sizeof(gscore[0][0][0]) * 401 * 241);
+	memset(fscore[s],1,sizeof(fscore[0][0][0]) * 401 * 241);
 	int x = sprites[s].x >> 8;
 	int y = sprites[s].y >> 8;
-	addOpenSet(x,y);
-	gscore[x][y] = 0;
-	fscore[x][y] = getDist(x,y,sprites[s].x >> 8,sprites[s].y >> 8);
+	addOpenSet(x,y,s);
+	gscore[s][x][y] = 0;
+	fscore[s][x][y] = getDist(x,y,sprites[s].x >> 8,sprites[s].y >> 8);
 	int i = 0;
-	while (openSetNotEmpty() && i < 80) {
-		if (closedSetN > 80) return 40;
-		if (openSetN > 80) return 40;
+	while (openSetNotEmpty(s) && i < 80) {
+		if (closedSetN[s] > 80) return 40;
+		if (openSetN[s] > 80) return 40;
 		hidScanInput();
 		if (hidKeysDown() & KEY_START) break;
 		//keepConsole();
 		i++;
-		setCurrentF();
+		setCurrentF(s);
 		/*C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target);
 			C3D_TexBind(0, &spritesheet_tex);
 			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
-			writeColor(current.x,current.y,colors[4]);
+			writeColor(current[s].x,current[s].y,colors[4]);
 		C3D_FrameEnd(0);*/
-		if (abs((apple.x >> 8) - current.x) < 3 && abs((apple.y >> 8) - current.y) < 3) {
+		if (abs((apple.x >> 8) - current[s].x) < 3 && abs((apple.y >> 8) - current[s].y) < 3) {
 			return 40;
 		}
-		remOpenSet(current.x,current.y);
-		addClosedSet(current.x,current.y);
+		remOpenSet(current[s].x,current[s].y,s);
+		addClosedSet(current[s].x,current[s].y,s);
 		//up
-		int myGScore = gscore[current.x][current.y] + 2;
+		int myGScore = gscore[s][current[s].x][current[s].y] + 2;
 		memset(directions,1,sizeof(directions[0]) * 4);
 		int smallest = INT_MAX;
 		int m = 0;
 		while (haveDirection()  && m < 4) {
 			m++;
 			int d = getDirection(s);
-			/*snprintf(mystring,sizeof(mystring),"dist: %d",getDist(getDirectionX(d),getDirectionY(d),sprites[s].x >> 8, sprites[s].y >> 8));
+			/*snprintf(mystring,sizeof(mystring),"dist: %d",getDist(getDirectionX(d,s),getDirectionY(d,s),sprites[s].x >> 8, sprites[s].y >> 8));
 			myprintf(mystring);*/
-			if (!getColor(getDirectionX(d),getDirectionY(d)) || getColor(getDirectionX(d),getDirectionY(d)) == colors[8]) 
+			if (!getColor(getDirectionX(d,s),getDirectionY(d,s)) || getColor(getDirectionX(d,s),getDirectionY(d,s)) == colors[8]) 
 			{
-				if (!inClosedSet(getDirectionX(d),getDirectionY(d))) {
-					if (!inOpenSet(getDirectionX(d),getDirectionY(d))) {
-							addOpenSet(getDirectionX(d),getDirectionY(d));
-							addNode(current.x,current.y,getDirectionX(d),getDirectionY(d), myGScore, s);
-					} else if (gscore[getDirectionX(d)][getDirectionY(d)] == 1 || myGScore < gscore[getDirectionX(d)][getDirectionY(d)]) addNode(current.x,current.y,getDirectionX(d),getDirectionY(d), myGScore, s);
+				if (!inClosedSet(getDirectionX(d,s),getDirectionY(d,s),s)) {
+					if (!inOpenSet(getDirectionX(d,s),getDirectionY(d,s),s)) {
+							addOpenSet(getDirectionX(d,s),getDirectionY(d,s),s);
+							addNode(current[s].x,current[s].y,getDirectionX(d,s),getDirectionY(d,s), myGScore, s);
+					} else if (gscore[s][getDirectionX(d,s)][getDirectionY(d,s)] == 1 || myGScore < gscore[s][getDirectionX(d,s)][getDirectionY(d,s)]) addNode(current[s].x,current[s].y,getDirectionX(d,s),getDirectionY(d,s), myGScore, s);
 				}
 				directions[d] = false;
 			}
@@ -1158,24 +1177,24 @@ int getMoveableRange(int s) {
 		}
 
 	}
-	return closedSetN / 2;
+	return closedSetN[s] / 2;
 }
 void getMoveableRangeApple(int s) {
-	if (s >= actual_bikes) return;
+	if (s >= numPlayers) return;
 	u64 startPath = svcGetSystemTick();
-	clearClosedSet();
-	clearOpenSet();
-	memset(gscore,1,sizeof(gscore[0][0]) * 401 * 241);
-	memset(fscore,1,sizeof(fscore[0][0]) * 401 * 241);
+	clearClosedSet(s);
+	clearOpenSet(s);
+	memset(gscore[s],1,sizeof(gscore[0][0][0]) * 401 * 241);
+	memset(fscore[s],1,sizeof(fscore[0][0][0]) * 401 * 241);
 	int x = sprites[s].x >> 8;
 	int y = sprites[s].y >> 8;
-	addOpenSet(x,y);
-	gscore[x][y] = 0;
-	fscore[x][y] = getDist(x,y,sprites[s].x >> 8,sprites[s].y >> 8);
+	addOpenSet(x,y,s);
+	gscore[s][x][y] = 0;
+	fscore[s][x][y] = getDist(x,y,sprites[s].x >> 8,sprites[s].y >> 8);
 	int i = 0;
-	while (openSetNotEmpty() && i < 400) {
-		if ((svcGetSystemTick() - startPath) / TICKS_PER_MS / (sprites[myNum].speed / 3)) {
-			if (!closedSet) {
+	while (openSetNotEmpty(s) && i < 400) {
+		if ((svcGetSystemTick() - startPath) / TICKS_PER_MS / (sprites[s].speed / 3)) {
+			if (!closedSet[s]) {
 				apple.x = ((rand() % (400 - 64)) + 30) << 8;
 				apple.y = ((rand() % (240 - 64)) + 30) << 8;
 				while (getColor(apple.x >> 8, apple.y >> 8) || getColor((apple.x >> 8) + 1, (apple.y >> 8) + 1)) {
@@ -1184,17 +1203,17 @@ void getMoveableRangeApple(int s) {
 				}
 				return;
 			}
-			apple.x = closedSet->x << 8;
-			apple.y = closedSet->y << 8;
+			apple.x = closedSet[s]->x << 8;
+			apple.y = closedSet[s]->y << 8;
 			return;
 		}
-		if (closedSetN > 400) { 
-			apple.x = closedSet->x << 8;
-			apple.y = closedSet->y << 8;
+		if (closedSetN[s] > 400) { 
+			apple.x = closedSet[s]->x << 8;
+			apple.y = closedSet[s]->y << 8;
 			return;
 		}
-		if (openSetN > 400) {
-			if (!closedSet) {
+		if (openSetN[s] > 400) {
+			if (!closedSet[s]) {
 				apple.x = ((rand() % (400 - 64)) + 30) << 8;
 				apple.y = ((rand() % (240 - 64)) + 30) << 8;
 				while (getColor(apple.x >> 8, apple.y >> 8) || getColor((apple.x >> 8) + 1, (apple.y >> 8) + 1)) {
@@ -1203,13 +1222,13 @@ void getMoveableRangeApple(int s) {
 				}
 				return;
 			}
-			apple.x = closedSet->x << 8;
-			apple.y = closedSet->y << 8;
+			apple.x = closedSet[s]->x << 8;
+			apple.y = closedSet[s]->y << 8;
 			return;
 		}
 		hidScanInput();
 		if (hidKeysDown() & KEY_START) {
-			if (!closedSet) {
+			if (!closedSet[s]) {
 				apple.x = ((rand() % (400 - 64)) + 30) << 8;
 				apple.y = ((rand() % (240 - 64)) + 30) << 8;
 				while (getColor(apple.x >> 8, apple.y >> 8) || getColor((apple.x >> 8) + 1, (apple.y >> 8) + 1)) {
@@ -1218,40 +1237,40 @@ void getMoveableRangeApple(int s) {
 				}
 				return;
 			}
-			apple.x = closedSet->x << 8;
-			apple.y = closedSet->y << 8;
+			apple.x = closedSet[s]->x << 8;
+			apple.y = closedSet[s]->y << 8;
 			return;
 		}
 		//keepConsole();
 		i++;
-		setCurrentF();
+		setCurrentF(s);
 
 		/*C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target);
 			C3D_TexBind(0, &spritesheet_tex);
 			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
-			writeColor(current.x,current.y,colors[4]);
+			writeColor(current[s].x,current[s].y,colors[4]);
 		C3D_FrameEnd(0);*/
 
-		remOpenSet(current.x,current.y);
-		addClosedSet(current.x,current.y);
+		remOpenSet(current[s].x,current[s].y,s);
+		addClosedSet(current[s].x,current[s].y,s);
 		//up
-		int myGScore = gscore[current.x][current.y] + 2;
+		int myGScore = gscore[s][current[s].x][current[s].y] + 2;
 		memset(directions,1,sizeof(directions[0]) * 4);
 		int smallest = INT_MAX;
 		int m = 0;
 		while (haveDirection() && m < 4) {
 			m++;
 			int d = getDirection(s);
-			/*snprintf(mystring,sizeof(mystring),"dist: %d",getDist(getDirectionX(d),getDirectionY(d),sprites[s].x >> 8, sprites[s].y >> 8));
+			/*snprintf(mystring,sizeof(mystring),"dist: %d",getDist(getDirectionX(d,s),getDirectionY(d,s),sprites[s].x >> 8, sprites[s].y >> 8));
 			myprintf(mystring);*/
-			if (!getColor(getDirectionX(d),getDirectionY(d)) || getColor(getDirectionX(d),getDirectionY(d)) == colors[8]) 
+			if (!getColor(getDirectionX(d,s),getDirectionY(d,s)) || getColor(getDirectionX(d,s),getDirectionY(d,s)) == colors[8]) 
 			{
-				if (!inClosedSet(getDirectionX(d),getDirectionY(d))) {
-					if (!inOpenSet(getDirectionX(d),getDirectionY(d))) {
-							addOpenSet(getDirectionX(d),getDirectionY(d));
-							addNode(current.x,current.y,getDirectionX(d),getDirectionY(d), myGScore, s);
-					} else if (gscore[getDirectionX(d)][getDirectionY(d)] == 1 || myGScore < gscore[getDirectionX(d)][getDirectionY(d)]) addNode(current.x,current.y,getDirectionX(d),getDirectionY(d), myGScore, s);
+				if (!inClosedSet(getDirectionX(d,s),getDirectionY(d,s),s)) {
+					if (!inOpenSet(getDirectionX(d,s),getDirectionY(d,s),s)) {
+							addOpenSet(getDirectionX(d,s),getDirectionY(d,s),s);
+							addNode(current[s].x,current[s].y,getDirectionX(d,s),getDirectionY(d,s), myGScore, s);
+					} else if (gscore[s][getDirectionX(d,s)][getDirectionY(d,s)] == 1 || myGScore < gscore[s][getDirectionX(d,s)][getDirectionY(d,s)]) addNode(current[s].x,current[s].y,getDirectionX(d,s),getDirectionY(d,s), myGScore, s);
 				}
 				directions[d] = false;
 			}
@@ -1259,7 +1278,7 @@ void getMoveableRangeApple(int s) {
 		}
 
 	}
-	if (!closedSet) {
+	if (!closedSet[s]) {
 		apple.x = ((rand() % (400 - 64)) + 30) << 8;
 		apple.y = ((rand() % (240 - 64)) + 30) << 8;
 		while (getColor(apple.x >> 8, apple.y >> 8) || getColor((apple.x >> 8) + 1, (apple.y >> 8) + 1)) {
@@ -1268,17 +1287,17 @@ void getMoveableRangeApple(int s) {
 		}
 		return;
 	}
-	apple.x = closedSet->x << 8;
-	apple.y = closedSet->y << 8;
+	apple.x = closedSet[s]->x << 8;
+	apple.y = closedSet[s]->y << 8;
 	return;
 }
-bool noCameFrom(int x, int y) {
-	return (!cameFrom[x][y].x && !cameFrom[x][y].y);
+bool noCameFrom(int x, int y, int s) {
+	return (!cameFrom[s][x][y].x && !cameFrom[s][x][y].y);
 }
-bool isCameFrom(int x, int y) {
-	return (cameFrom[x][y].x || cameFrom[x][y].y);
+bool isCameFrom(int x, int y, int s) {
+	return (cameFrom[s][x][y].x || cameFrom[s][x][y].y);
 }
-void showCameFrom() {
+void showCameFrom(int s) {
 	/*snprintf(mystring,sizeof(mystring),"totalpathn: %d",totalPathN);
 	myprintf(mystring);*/
 	float px = 0;
@@ -1299,40 +1318,40 @@ void showCameFrom() {
 		dpx = (int)px;
 		dpy = (int)py;
 		keepConsole();
-		if (totalPathN < 500) for (int m = totalPathN; m >= 0; m--) {
-			writeColor(totalPath[m].x,totalPath[m].y,colors[1]);
+		if (totalPathN[s] < 500) for (int m = totalPathN[s]; m >= 0; m--) {
+			writeColor(totalPath[s][m].x,totalPath[s][m].y,colors[1]);
 		}
 		if (px && py) {
 			C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 				C3D_FrameDrawOn(target);
 				C3D_TexBind(0, &spritesheet_tex);
 				C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
-				if (noCameFrom(dpx,dpy)) {
-					if (isCameFrom(sanitizeX(dpx + 1),dpy)) dpx += 1;
-					else if (isCameFrom(dpx,sanitizeY(dpy + 1))) dpy += 1;
-					else if (isCameFrom(sanitizeX(dpx + 1),sanitizeY(dpy + 1))) { dpx += 1; dpy += 1; }
+				if (noCameFrom(dpx,dpy,s)) {
+					if (isCameFrom(sanitizeX(dpx + 1),dpy,s)) dpx += 1;
+					else if (isCameFrom(dpx,sanitizeY(dpy + 1),s)) dpy += 1;
+					else if (isCameFrom(sanitizeX(dpx + 1),sanitizeY(dpy + 1),s)) { dpx += 1; dpy += 1; }
 				}
 				writeColor(dpx, dpy, colors[8]);
-				writeColor(current.x,current.y,colors[3]);
-				int tx = current.x;
+				writeColor(current[s].x,current[s].y,colors[3]);
+				int tx = current[s].x;
 				int otx;
-				int ty = current.y;
+				int ty = current[s].y;
 				while (tx != 0 || ty != 0) {
 					writeColor(tx,ty,colors[3]);
 					otx = tx;
-					tx = cameFrom[tx][ty].x;
-					ty = cameFrom[otx][ty].y;
+					tx = cameFrom[s][tx][ty].x;
+					ty = cameFrom[s][otx][ty].y;
 				}
 				int i = 0; int tempx, tempy;
-				while (isCameFrom(dpx,dpy) && i < 100) {
+				while (isCameFrom(dpx,dpy,s) && i < 100) {
 					i++;
-					writeColor(cameFrom[dpx][dpy].x,cameFrom[dpx][dpy].y,colors[1]);
-					writeColor(sanitizeX(cameFrom[dpx][dpy].x + 1),cameFrom[dpx][dpy].y,colors[1]);
-					writeColor(sanitizeX(cameFrom[dpx][dpy].x + 1),sanitizeY(cameFrom[dpx][dpy].y + 1),colors[1]);
-					writeColor(cameFrom[dpx][dpy].x,sanitizeY(cameFrom[dpx][dpy].y + 1),colors[1]);
+					writeColor(cameFrom[s][dpx][dpy].x,cameFrom[s][dpx][dpy].y,colors[1]);
+					writeColor(sanitizeX(cameFrom[s][dpx][dpy].x + 1),cameFrom[s][dpx][dpy].y,colors[1]);
+					writeColor(sanitizeX(cameFrom[s][dpx][dpy].x + 1),sanitizeY(cameFrom[s][dpx][dpy].y + 1),colors[1]);
+					writeColor(cameFrom[s][dpx][dpy].x,sanitizeY(cameFrom[s][dpx][dpy].y + 1),colors[1]);
 					tempx = dpx;
-					dpx = cameFrom[dpx][dpy].x;
-					dpy = cameFrom[tempx][dpy].y;
+					dpx = cameFrom[s][dpx][dpy].x;
+					dpy = cameFrom[s][tempx][dpy].y;
 				}
 			C3D_FrameEnd(0);
 			oldpx = px;
@@ -1344,44 +1363,46 @@ void showCameFrom() {
 	}
 }
 void getFarthestCurrent(int s) {
-	Path *c = closedSet;
+	int ac = getBot(s);
+	Path *c = closedSet[s];
 	int pdis = 0;
-	int myx = sprites[s].x >> 8;
-	int myy = sprites[s].y >> 8;
+	int myx = sprites[ac].x >> 8;
+	int myy = sprites[ac].y >> 8;
 	while (c) {
 		if (getDist(myx,myy,c->x,c->y) > pdis) {
 			bool flag = true;
 			if (getColor(c->x,c->y)) { c = c->next; continue; }
 			for (int i = 4; i < 8; i++) {
-				if (getColor(getDirectionXTo(i,c->x,myNum),getDirectionYTo(i,c->y,myNum))) flag = false;
+				if (getColor(getDirectionXTo(i,c->x,s),getDirectionYTo(i,c->y,s))) flag = false;
 			}
 			if (!flag) { c = c->next; continue; }
-			current.x = c->x;
-			current.y = c->y;
+			current[s].x = c->x;
+			current[s].y = c->y;
 			pdis = getDist(myx,myy,c->x,c->y);
 		}
 		c = c->next;
 	}
 }
 void plotMovement(int s) {
-	if (totalPathN > 10) return;
-	if (s >= actual_bikes) {
-		plotting = false;
-		totalPathN = 0;
+	int ac = getBot(s);
+	if (totalPathN[s] > 10) return;
+	if (s >= numPlayers()) {
+		plotting[s] = false;
+		totalPathN[s] = 0;
 		return;
 	}
 	int tempx;
 	int tempy;
-	totalPathN = 0;
-	while ((cameFrom[current.x][current.y].x || cameFrom[current.x][current.y].y) && totalPathN < 1000) {
-		tempx = cameFrom[current.x][current.y].x;
-		tempy = cameFrom[current.x][current.y].y;
-		totalPath[totalPathN].x = current.x;
-		totalPath[totalPathN].y = current.y;
-		totalPathN++;
-		if (tempx == sprites[s].x >> 8 && tempy == sprites[s].y >> 8) break;
-		current.x = tempx;
-		current.y = tempy;
+	totalPathN[s] = 0;
+	while ((cameFrom[s][current[s].x][current[s].y].x || cameFrom[s][current[s].x][current[s].y].y) && totalPathN[s] < 1000) {
+		tempx = cameFrom[s][current[s].x][current[s].y].x;
+		tempy = cameFrom[s][current[s].x][current[s].y].y;
+		totalPath[s][totalPathN[s]].x = current[s].x;
+		totalPath[s][totalPathN[s]].y = current[s].y;
+		totalPathN[s]++;
+		if (tempx == sprites[ac].x >> 8 && tempy == sprites[ac].y >> 8) break;
+		current[s].x = tempx;
+		current[s].y = tempy;
 	}
 }
 bool isAPlaceIMoved(int x, int y) {
@@ -1395,27 +1416,28 @@ bool isAPlaceIMoved(int x, int y) {
 	while (isAPlaceIMoved(closedSet[i].x,closedSet[i].y)) {
 		i++;
 	}
-	current.x = closedSet[i].x;
-	current.y = closedSet[i].y;
+	current[s].x = closedSet[i].x;
+	current[s].y = closedSet[i].y;
 }*/
 void showPlotMovement(int s) {
-	plotting = true;
-	if (totalPathN > 10) return;
+	plotting[s] = true;
+	if (totalPathN[s] > 10) return;
+	int ac = getBot(s);
 	/*myprintf("calculating...");*/
 	getFarthestCurrent(s);
 	int tempx;
 	int tempy;
-	totalPathN = 0;
-	while ((cameFrom[current.x][current.y].x || cameFrom[current.x][current.y].y) && totalPathN < 240 * 400) {
-		tempx = cameFrom[current.x][current.y].x;
-		tempy = cameFrom[current.x][current.y].y;
-		if (getColor(tempx,tempy) && tempx != sprites[s].x >> 8 && tempy != sprites[s].y >> 8)  {
-			plotting = false;
-			totalPathN = 0;
+	totalPathN[s] = 0;
+	while ((cameFrom[s][current[s].x][current[s].y].x || cameFrom[s][current[s].x][current[s].y].y) && totalPathN[s] < 240 * 400) {
+		tempx = cameFrom[s][current[s].x][current[s].y].x;
+		tempy = cameFrom[s][current[s].x][current[s].y].y;
+		if (getColor(tempx,tempy) && tempx != sprites[ac].x >> 8 && tempy != sprites[ac].y >> 8)  {
+			plotting[s] = false;
+			totalPathN[s] = 0;
 			return;
 		}
-		totalPath[totalPathN].x = current.x;
-		totalPath[totalPathN].y = current.y;
+		totalPath[s][totalPathN[s]].x = current[s].x;
+		totalPath[s][totalPathN[s]].y = current[s].y;
 		/*hidScanInput();
 		u32 kDown = hidKeysDown();
 		if (kDown & KEY_START) break;
@@ -1427,16 +1449,16 @@ void showPlotMovement(int s) {
 				C3D_FrameDrawOn(target);
 				C3D_TexBind(0, &spritesheet_tex);
 				C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
-				writeColor(current.x + 1,current.y + 1,colors[8]);
+				writeColor(current[s].x + 1,current[s].y + 1,colors[8]);
 			C3D_FrameEnd(0);
 		}*/
-		totalPathN++;
-		if (tempx == sprites[s].x >> 8 && tempy == sprites[s].y >> 8) break;
-		current.x = tempx;
-		current.y = tempy;
+		totalPathN[s]++;
+		if (tempx == sprites[ac].x >> 8 && tempy == sprites[ac].y >> 8) break;
+		current[s].x = tempx;
+		current[s].y = tempy;
 	}
-	if (totalPathN >= 240 * 400) {
-		bool isGone = (current.x == 0 && current.y == 0);
+	if (totalPathN[s] >= 240 * 400) {
+		bool isGone = (current[s].x == 0 && current[s].y == 0);
 		/*snprintf(mystring,sizeof(mystring),"wtf.. %d",isGone);
 		myprintf(mystring);*/
 	}
@@ -1444,21 +1466,23 @@ void showPlotMovement(int s) {
 	myprintf(mystring);*/
 }
 void showPathToApple(int s) {
-	plotting = false;
-	if (s >= actual_bikes) {
-		plotting = false;
-		totalPathN = 0;
+	plotting[s] = false;
+	int ac = getBot(s);
+	if (ac >= numPlayers()) {
+		plotting[s] = false;
+		totalPathN[s] = 0;
 		return;
 	}
+	sprites[ac].speed = 45;
 	int tempx;
 	int tempy;
-	plotting = false;
-	totalPathN = 0;
-	while ((cameFrom[current.x][current.y].x || cameFrom[current.x][current.y].y) && totalPathN < 240 * 400) {
-		tempx = cameFrom[current.x][current.y].x;
-		tempy = cameFrom[current.x][current.y].y;
-		totalPath[totalPathN].x = current.x;
-		totalPath[totalPathN].y = current.y;
+	plotting[s] = false;
+	totalPathN[s] = 0;
+	while ((cameFrom[s][current[s].x][current[s].y].x || cameFrom[s][current[s].x][current[s].y].y) && totalPathN[s] < 240 * 400) {
+		tempx = cameFrom[s][current[s].x][current[s].y].x;
+		tempy = cameFrom[s][current[s].x][current[s].y].y;
+		totalPath[s][totalPathN[s]].x = current[s].x;
+		totalPath[s][totalPathN[s]].y = current[s].y;
 		/*hidScanInput();
 		u32 kDown = hidKeysDown();
 		if (kDown & KEY_START) break;
@@ -1470,20 +1494,20 @@ void showPathToApple(int s) {
 				C3D_FrameDrawOn(target);
 				C3D_TexBind(0, &spritesheet_tex);
 				C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
-				writeColor(current.x + 1,current.y + 1,colors[8]);
+				writeColor(current[s].x + 1,current[s].y + 1,colors[8]);
 			C3D_FrameEnd(0);
 		}
-		totalPathN++;
-		if (tempx == sprites[s].x >> 8 && tempy == sprites[s].y >> 8) break;
-		current.x = tempx;
-		current.y = tempy;
+		totalPathN[s]++;
+		if (tempx == sprites[ac].x >> 8 && tempy == sprites[ac].y >> 8) break;
+		current[s].x = tempx;
+		current[s].y = tempy;
 	}
-	if (totalPathN >= 240 * 400) {
-		bool isGone = (current.x == 0 && current.y == 0);
+	if (totalPathN[s] >= 240 * 400) {
+		bool isGone = (current[s].x == 0 && current[s].y == 0);
 		/*snprintf(mystring,sizeof(mystring),"wtf.. %d",isGone);
 		myprintf(mystring);*/
-		totalPathN = 0;
-		plotting = false;
+		totalPathN[s] = 0;
+		plotting[s] = false;
 	}
 	/*snprintf(mystring,sizeof(mystring),"totalPathN: %d",totalPathN);
 	myprintf(mystring);*/
@@ -1503,40 +1527,50 @@ void showPathToApple(int s) {
 		C3D_FrameEnd(0);
 	}*/
 }
-u32 timeDiff(int num) {
-	return (u32)((svcGetSystemTick() - frameTicks[num]) / TICKS_PER_MS / sprites[num].speed);
+u64 firstTimeDiff() {
+	u64 smallest = frameTicks[0] + ((u64)sprites[0].speed * (u64)TICKS_PER_MS);
+	for (int i = 1; i < numPlayers(); i++) {
+		if (frameTicks[i] + ((u64)sprites[i].speed * (u64)TICKS_PER_MS) < smallest) {
+			smallest = frameTicks[i] + ((u64)sprites[i].speed * (u64)TICKS_PER_MS);
+		}
+	}
+	return (u64)(smallest - svcGetSystemTick());
+}
+u64 timeDiff(int num) {
+	return (u64)(((svcGetSystemTick() - frameTicks[num]) / TICKS_PER_MS) / sprites[num].speed);
 }
 void continuePlotting(int s) {
-	plotting = true;
-	sprites[s].speed = 90;
-	int x = sprites[s].x >> 8;
-	int y = sprites[s].y >> 8;
+	int ac = getBot(s);
+	u64 startThinking = svcGetSystemTick();
+	plotting[s] = true;
+	if (!options[4]) sprites[ac].speed = 90;
+	int x = sprites[ac].x >> 8;
+	int y = sprites[ac].y >> 8;
 	/*cameFrom[x][y].x = 1;
 	cameFrom[x][y].y = 1;*/
-	u64 plotStart = svcGetSystemTick();
 	int i = 0;
-	while (openSetNotEmpty() && i < 400) {
+	u64 thinkingTime = 15 * TICKS_PER_MS;
+	thinkingTime /= currentBots;
+	while (openSetNotEmpty(s) && i < 400) {
 		i++;
-		for (int k = 0; k < actual_bikes; k++) {
-			if (!debugging && timeDiff(k)) {
-				sprites[s].speed = 90;
-				showPlotMovement(s);
-				return;
-			}
-		}
-		if (closedSetN > 240 * 400) {
-			sprites[s].speed = 90; 
+		if (svcGetSystemTick() - startThinking > thinkingTime) {
+			if (!options[4]) sprites[ac].speed = 90;
 			showPlotMovement(s);
 			return;
 		}
-		if (openSetN > 240 * 400) {
-			sprites[s].speed = 90;
+		if (closedSetN[s] > 240 * 400) {
+			if (!options[4]) sprites[ac].speed = 90; 
 			showPlotMovement(s);
 			return;
 		}
-		setCurrentF();
-		if (abs((apple.x >> 8) - current.x) < 3 && abs((apple.y >> 8) - current.y) < 3) {
-			sprites[s].speed = 45;
+		if (openSetN[s] > 240 * 400) {
+			if (!options[4]) sprites[ac].speed = 90;
+			showPlotMovement(s);
+			return;
+		}
+		setCurrentF(s);
+		if (abs((apple.x >> 8) - current[s].x) < 3 && abs((apple.y >> 8) - current[s].y) < 3) {
+			sprites[ac].speed = 45;
 			showPathToApple(s);
 			return;
 		}
@@ -1558,13 +1592,13 @@ void continuePlotting(int s) {
 				C3D_FrameDrawOn(target);
 				C3D_TexBind(0, &spritesheet_tex);
 				C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
-				writeColor(current.x,current.y,colors[4]);
+				writeColor(current[s].x,current[s].y,colors[4]);
 			C3D_FrameEnd(0);
 		}
-		remOpenSet(current.x,current.y);
-		addClosedSet(current.x,current.y);
+		remOpenSet(current[s].x,current[s].y,s);
+		addClosedSet(current[s].x,current[s].y,s);
 		//up
-		int myGScore = gscore[current.x][current.y] - previousSteps + 2;
+		int myGScore = gscore[s][current[s].x][current[s].y] + 2;
 		memset(directions,1,sizeof(directions[0]) * 4);
 		int smallest = INT_MAX;
 		int m = 0;
@@ -1574,65 +1608,68 @@ void continuePlotting(int s) {
 			/*snprintf(mystring,sizeof(mystring),"d: %d",d);
 			myprintf(mystring);
 			keepConsole();*/
-			if (((!getColor(getDirectionX(d),getDirectionY(d)) && !getColor(sanitizeX(getDirectionX(d) + 1),sanitizeY(getDirectionY(d) + 1)) && !(x == getDirectionX(d) && y == getDirectionY(d)))) || getColor(getDirectionX(d),getDirectionY(d)) == colors[8] || getColor(sanitizeX(getDirectionX(d) + 1),sanitizeY(getDirectionY(d) + 1)) == colors[8]) 
+			if (((!getColor(getDirectionX(d,s),getDirectionY(d,s)) && !getColor(sanitizeX(getDirectionX(d,s) + 1),sanitizeY(getDirectionY(d,s) + 1)) && !(x == getDirectionX(d,s) && y == getDirectionY(d,s)))) || getColor(getDirectionX(d,s),getDirectionY(d,s)) == colors[8] || getColor(sanitizeX(getDirectionX(d,s) + 1),sanitizeY(getDirectionY(d,s) + 1)) == colors[8]) 
 			{
-				if (!inClosedSet(getDirectionX(d),getDirectionY(d))) {
-					if (!inOpenSet(getDirectionX(d),getDirectionY(d))) {
-							addOpenSet(getDirectionX(d),getDirectionY(d));
-							continueAddNodeToApple(current.x,current.y,getDirectionX(d),getDirectionY(d), myGScore, s);
-					} else if (gscore[getDirectionX(d)][getDirectionY(d)] == 1 || myGScore < gscore[getDirectionX(d)][getDirectionY(d)] + previousSteps) continueAddNodeToApple(current.x,current.y,getDirectionX(d),getDirectionY(d), myGScore, s);
+				if (!inClosedSet(getDirectionX(d,s),getDirectionY(d,s),s)) {
+					if (!inOpenSet(getDirectionX(d,s),getDirectionY(d,s),s)) {
+							addOpenSet(getDirectionX(d,s),getDirectionY(d,s),s);
+							continueAddNodeToApple(current[s].x,current[s].y,getDirectionX(d,s),getDirectionY(d,s), myGScore, s);
+					} else if (gscore[s][getDirectionX(d,s)][getDirectionY(d,s)] == 1 || myGScore < gscore[s][getDirectionX(d,s)][getDirectionY(d,s)] + previousSteps) continueAddNodeToApple(current[s].x,current[s].y,getDirectionX(d,s),getDirectionY(d,s), myGScore, s);
 				}
 				directions[d] = false;
 			}
 			directions[d] = false;
 		}
 	}
-	sprites[s].speed = 90;
+	if (!options[4]) sprites[ac].speed = 90;
 	showPlotMovement(s);
 	return;
 }
 void plotCourse(int s) {
-	plotting = false;
+	int ac = getBot(s);
+	u64 startThinking = svcGetSystemTick();
+	u64 thinkingTime = firstTimeDiff();
+	plotting[s] = false;
 	/*myprintf("plotcourse()");*/
 	previousSteps = 0;
 	placesIMovedN = 0;
-	clearClosedSet();
-	clearOpenSet();
-	memset(cameFrom,0,sizeof(cameFrom[0][0]) * 401 * 241);
-	memset(totalPath,0,sizeof(totalPath[0]) * 401 * 241);
-	memset(gscore,1,sizeof(gscore[0][0]) * 401 * 241);
-	memset(fscore,1,sizeof(fscore[0][0]) * 401 * 241);
-	int x = sprites[s].x >> 8;
-	int y = sprites[s].y >> 8;
-	addOpenSet(x,y);
-	gscore[x][y] = 2;
-	fscore[x][y] = getDist(x,y,apple.x >> 8,apple.y >> 8) * epsilon;
-	if (s >= actual_bikes) { plotMovement(s); return; }
+	clearClosedSet(s);
+	clearOpenSet(s);
+	memset(cameFrom[s],0,sizeof(cameFrom[0][0][0]) * 401 * 241);
+	memset(totalPath[s],0,sizeof(totalPath[0][0]) * 401 * 241);
+	memset(gscore[s],1,sizeof(gscore[0][0][0]) * 401 * 241);
+	memset(fscore[s],1,sizeof(fscore[0][0][0]) * 401 * 241);
+	int x = sprites[ac].x >> 8;
+	int y = sprites[ac].y >> 8;
+	addOpenSet(x,y,s);
+	gscore[s][x][y] = 2;
+	fscore[s][x][y] = getDist(x,y,apple.x >> 8,apple.y >> 8) * epsilon;
+	if (s >= numPlayers) { plotMovement(s); return; }
 	if (getDist(x,y,apple.x >> 8,apple.y >> 8) * epsilon < 4) { plotMovement(s); return; }
 	int i = 0;
 	u64 plotStart = svcGetSystemTick();
-	current.x = x;
-	current.y = y;
-	while (openSetNotEmpty() && i < 240 * 400) {
+	current[s].x = x;
+	current[s].y = y;
+	while (openSetNotEmpty(s) && i < 240 * 400) {
 		i++;
-		if ((svcGetSystemTick() - plotStart) / TICKS_PER_MS / (sprites[myNum].speed / 3)) {
-			sprites[s].speed = 90;
+		if ((svcGetSystemTick() - plotStart) / TICKS_PER_MS / (sprites[ac].speed / 3)) {
+			if (!options[4]) sprites[ac].speed = 90;
 			showPlotMovement(s);
 			return;
 		}
-		if (closedSetN > 240 * 400) { 
-			sprites[s].speed = 90;
+		if (closedSetN[s] > 240 * 400) { 
+			if (!options[4]) sprites[ac].speed = 90;
 			showPlotMovement(s);
 			return;
 		}
-		if (openSetN > 240 * 400) {
-			sprites[s].speed = 90;
+		if (openSetN[s] > 240 * 400) {
+			if (!options[4]) sprites[ac].speed = 90;
 			showPlotMovement(s);
 			return;
 		}
-		setCurrentF();
-		if (abs((apple.x >> 8) - current.x) < 3 && abs((apple.y >> 8) - current.y) < 3) {
-			sprites[s].speed = 45;
+		setCurrentF(s);
+		if (abs((apple.x >> 8) - current[s].x) < 3 && abs((apple.y >> 8) - current[s].y) < 3) {
+			sprites[ac].speed = 45;
 			showPathToApple(s);
 			return;
 		}
@@ -1642,10 +1679,10 @@ void plotCourse(int s) {
 			showPlotMovement(s);
 			return;
 		}*/
-		remOpenSet(current.x,current.y);
-		addClosedSet(current.x,current.y);
+		remOpenSet(current[s].x,current[s].y,s);
+		addClosedSet(current[s].x,current[s].y,s);
 		//up
-		int myGScore = gscore[current.x][current.y] + 2;
+		int myGScore = gscore[s][current[s].x][current[s].y] + 2;
 		memset(directions,1,sizeof(directions[0]) * 4);
 		int smallest = INT_MAX;
 		int m = 0;
@@ -1655,42 +1692,43 @@ void plotCourse(int s) {
 			/*snprintf(mystring,sizeof(mystring),"d: %d",d);
 			myprintf(mystring);
 			keepConsole();*/
-			if (((!getColor(getDirectionX(d),getDirectionY(d)) && !getColor(sanitizeX(getDirectionX(d) + 1),sanitizeY(getDirectionY(d) + 1)) && !(x == getDirectionX(d) && y == getDirectionY(d)))) || getColor(getDirectionX(d),getDirectionY(d)) == colors[8] || getColor(sanitizeX(getDirectionX(d) + 1),sanitizeY(getDirectionY(d) + 1)) == colors[8]) 
+			if (((!getColor(getDirectionX(d,s),getDirectionY(d,s)) && !getColor(sanitizeX(getDirectionX(d,s) + 1),sanitizeY(getDirectionY(d,s) + 1)) && !(x == getDirectionX(d,s) && y == getDirectionY(d,s)))) || getColor(getDirectionX(d,s),getDirectionY(d,s)) == colors[8] || getColor(sanitizeX(getDirectionX(d,s) + 1),sanitizeY(getDirectionY(d,s) + 1)) == colors[8]) 
 			{
-				if (!inClosedSet(getDirectionX(d),getDirectionY(d))) {
-					if (!inOpenSet(getDirectionX(d),getDirectionY(d))) {
-							addOpenSet(getDirectionX(d),getDirectionY(d));
-							addNodeToApple(current.x,current.y,getDirectionX(d),getDirectionY(d), myGScore, s);
-					} else if (gscore[getDirectionX(d)][getDirectionY(d)] == 1 || myGScore < gscore[getDirectionX(d)][getDirectionY(d)]) addNodeToApple(current.x,current.y,getDirectionX(d),getDirectionY(d), myGScore, s);
+				if (!inClosedSet(getDirectionX(d,s),getDirectionY(d,s),s)) {
+					if (!inOpenSet(getDirectionX(d,s),getDirectionY(d,s),s)) {
+							addOpenSet(getDirectionX(d,s),getDirectionY(d,s),s);
+							addNodeToApple(current[s].x,current[s].y,getDirectionX(d,s),getDirectionY(d,s), myGScore, s);
+					} else if (gscore[s][getDirectionX(d,s)][getDirectionY(d,s)] == 1 || myGScore < gscore[s][getDirectionX(d,s)][getDirectionY(d,s)]) addNodeToApple(current[s].x,current[s].y,getDirectionX(d,s),getDirectionY(d,s), myGScore, s);
 				}
 				directions[d] = false;
 			}
 			directions[d] = false;
 		}
-		if (openSetN == 0) break;
+		if (openSetN[s] == 0) break;
 	}
-	sprites[s].speed = 90;
+	if (!options[4]) sprites[ac].speed = 90;
 	showPlotMovement(s);
 	return;
 }
 bool pathfindToApple(int s) {
-	if (s >= actual_bikes) return false;
+	if (s >= numPlayers()) return false;
+	int ac = getBot(s);
 	u64 startPathFind = svcGetSystemTick();
-	clearClosedSet();
-	clearOpenSet();
-	memset(gscore,1,sizeof(gscore[0][0]) * 400 * 240);
-	memset(fscore,1,sizeof(fscore[0][0]) * 400 * 240);
+	clearClosedSet(s);
+	clearOpenSet(s);
+	memset(gscore[s],1,sizeof(gscore[0][0][0]) * 401 * 241);
+	memset(fscore[s],1,sizeof(fscore[0][0][0]) * 401 * 241);
 	int x = apple.x >> 8;
 	int y = apple.y >> 8;
-	addOpenSet(x,y);
-	gscore[x][y] = 0;
-	fscore[x][y] = getDist(x,y,sprites[s].x >> 8,sprites[s].y >> 8) * epsilon;
-	if (getDist(x,y,sprites[s].x >> 8,sprites[s].y >> 8) * epsilon < 4) return true;
+	addOpenSet(x,y,s);
+	gscore[s][x][y] = 0;
+	fscore[s][x][y] = getDist(x,y,sprites[ac].x >> 8,sprites[ac].y >> 8) * epsilon;
+	if (getDist(x,y,sprites[ac].x >> 8,sprites[ac].y >> 8) * epsilon < 4) return true;
 	int i = 0;
-	while (openSetNotEmpty() && i < 240 * 400) {
-		if ((svcGetSystemTick() - startPathFind) / TICKS_PER_MS / (sprites[s].speed / 3)) return false;
-		if (closedSetN > 240 * 400) return false;
-		if (openSetN > 240 * 400) return false;
+	while (openSetNotEmpty(s) && i < 240 * 400) {
+		if ((svcGetSystemTick() - startPathFind) / TICKS_PER_MS / (sprites[ac].speed / 3)) return false;
+		if (closedSetN[s] > 240 * 400) return false;
+		if (openSetN[s] > 240 * 400) return false;
 		/*hidScanInput();
 		u32 kDown = hidKeysDown();
 		u32 kUp = hidKeysUp();
@@ -1709,37 +1747,37 @@ bool pathfindToApple(int s) {
 		}*/
 		//keepConsole();
 		i++;
-		setCurrentF();
+		setCurrentF(s);
 
 		/*C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target);
 			C3D_TexBind(0, &spritesheet_tex);
 			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
-			writeColor(current.x,current.y,colors[6]);
+			writeColor(current[s].x,current[s].y,colors[6]);
 		C3D_FrameEnd(0);*/
-		if (abs((sprites[s].x >> 8) - current.x) <= 2 && abs((sprites[s].y >> 8) - current.y) <= 2) {
+		if (abs((sprites[ac].x >> 8) - current[s].x) <= 2 && abs((sprites[ac].y >> 8) - current[s].y) <= 2) {
 			return true;
 		}
 
-		remOpenSet(current.x,current.y);
-		addClosedSet(current.x,current.y);
+		remOpenSet(current[s].x,current[s].y,s);
+		addClosedSet(current[s].x,current[s].y,s);
 		//up
-		int myGScore = gscore[current.x][current.y] + 2;
+		int myGScore = gscore[s][current[s].x][current[s].y] + 2;
 		memset(directions,1,sizeof(directions[0]) * 4);
 		int smallest = INT_MAX;
 		int m = 0;
 		while (haveDirection() && m < 4) {
 			m++;
 			int d = getDirection(s);
-			/*snprintf(mystring,sizeof(mystring),"dist: %d",getDist(getDirectionX(d),getDirectionY(d),sprites[s].x >> 8, sprites[s].y >> 8));
+			/*snprintf(mystring,sizeof(mystring),"dist: %d",getDist(getDirectionX(d,s),getDirectionY(d,s),sprites[s].x >> 8, sprites[s].y >> 8));
 			myprintf(mystring);*/
-			if (!getColor(getDirectionX(d),getDirectionY(d)) || getColor(getDirectionX(d),getDirectionY(d)) == colors[8]) 
+			if (!getColor(getDirectionX(d,s),getDirectionY(d,s)) || getColor(getDirectionX(d,s),getDirectionY(d,s)) == colors[8]) 
 			{
-				if (!inClosedSet(getDirectionX(d),getDirectionY(d))) {
-					if (!inOpenSet(getDirectionX(d),getDirectionY(d))) {
-							addOpenSet(getDirectionX(d),getDirectionY(d));
-							addNode(current.x,current.y,getDirectionX(d),getDirectionY(d), myGScore, s);
-					} else if (gscore[getDirectionX(d)][getDirectionY(d)] == 1 || myGScore < gscore[getDirectionX(d)][getDirectionY(d)]) { addNode(current.x,current.y,getDirectionX(d),getDirectionY(d), myGScore, s); }
+				if (!inClosedSet(getDirectionX(d,s),getDirectionY(d,s),s)) {
+					if (!inOpenSet(getDirectionX(d,s),getDirectionY(d,s),s)) {
+							addOpenSet(getDirectionX(d,s),getDirectionY(d,s),s);
+							addNode(current[s].x,current[s].y,getDirectionX(d,s),getDirectionY(d,s), myGScore, s);
+					} else if (gscore[s][getDirectionX(d,s)][getDirectionY(d,s)] == 1 || myGScore < gscore[s][getDirectionX(d,s)][getDirectionY(d,s)]) { addNode(current[s].x,current[s].y,getDirectionX(d,s),getDirectionY(d,s), myGScore, s); }
 				}
 				directions[d] = false;
 			}
@@ -1765,12 +1803,13 @@ void drawSprite( int x, int y, int width, int height, int image ) {
 	float bottom = images[image].bottom;
 
 	if (image != 9) {
-		for (int i = totalPathN - 3; i >= 0; i--) {
-			if (abs(x - totalPath[i].x) <= 2 && abs(y - totalPath[i].y) <= 2) {
-				/*myprintf("yep");*/
-				plotting = false;
-				totalPathN = 0;
-				break;
+		for (int j = 0; j < numBots; j++) {
+			for (int i = totalPathN[j] - 2; i >= 0; i--) {
+				if (abs(x - totalPath[j][i].x) <= 2 && abs(y - totalPath[j][i].y) <= 2) {
+					plotting[j] = false;
+					totalPathN[j] = 0;
+					break;
+				}
 			}
 		}
 	}
@@ -1811,12 +1850,13 @@ void overwriteSprite( int x, int y, int width, int height, int image ) {
 	float bottom = images[image].bottom;
 
 	if (image != 9) {
-		for (int i = totalPathN - 3; i >= 0; i--) {
-			if (abs(x - totalPath[i].x) <= 2 && abs(y - totalPath[i].y) <= 2) {
-				/*myprintf("yep");*/
-				plotting = false;
-				totalPathN = 0;
-				break;
+		for (int j = 0; j < numBots; j++) {
+			for (int i = totalPathN[j] - 2; i >= 0; i--) {
+				if (abs(x - totalPath[j][i].x) <= 2 && abs(y - totalPath[j][i].y) <= 2) {
+					plotting[j] = false;
+					totalPathN[j] = 0;
+					break;
+				}
 			}
 		}
 	}
@@ -1936,10 +1976,10 @@ static int UDSDirect(int node, Message msg) {
 bool itsATie() {
 	int s = score[0];
 	int winner = 0;
-	for (int i = 0; i < num_bikes; i++) {
+	for (int i = 0; i < numPlayers(); i++) {
 		if (score[i] > s) { s = score[i]; winner = i; }
 	}
-	for (int i = 0; i < num_bikes; i++) {
+	for (int i = 0; i < numPlayers(); i++) {
 		if (score[i] == s && i != winner) return true;
 	}
 	return false;
@@ -1948,7 +1988,7 @@ int getHighestScore() {
 	int highestScore = 0;
 	if (itsATie()) return -1;
 	int r = 0;
-	for (int i = 0; i < num_bikes; i++) {
+	for (int i = 0; i < numPlayers(); i++) {
 		if (score[i] > highestScore) {
 			highestScore = score[i];
 			r = i;
@@ -1958,18 +1998,14 @@ int getHighestScore() {
 }
 int theHighest() {
 	int r = 0;
-	for (int i = 0; i < num_bikes; i++) {
+	for (int i = 0; i < numPlayers(); i++) {
 		if (r < score[i]) r = score[i];
 	}
 	return r;
 }
-bool everyoneElseIsDead() {
-	if (actual_bikes <= 1) {
-		if (sprites[0].dead) return true;
-		return false;
-	}
-	for (int i = 0; i < num_bikes; i++) {
-		if (i != myNum && !sprites[i].dead) return false;
+bool everyoneElseIsDead(int n) {
+	for (int i = 0; i < numPlayers(); i++) {
+		if (i != n && !sprites[i].dead) return false;
 	}
 	return true;
 }
@@ -2010,7 +2046,7 @@ int getAlive() {
 		if (sprites[i].dead || getMoveableRange(i) < 40) k++;
 	}
 	if (k >= actual_bikes - 1) return -1;
-	if (everyoneElseIsDead()) return myNum;
+	if (everyoneElseIsDead(myNum)) return myNum;
 	int r = (rand() % actual_bikes);
 	//while (sprites[r].dead) r = rand() % actual_bikes;
 	if (r >= actual_bikes) return myNum;
@@ -2054,7 +2090,9 @@ static void setSprites() {
 		sprites[i].diag = 0;
 		sprites[i].forwards = true;
 
-		memset(sprites[i].username,'\0',sizeof(sprites[i].username));
+
+		if (i > currentBots) memset(sprites[i].username,'\0',sizeof(sprites[i].username));
+		else if (i != 0) snprintf(sprites[i].username,sizeof(sprites[i].username),"Saad");
 		path[0][i].x = sprites[i].x;
 		path[0][i].y = sprites[i].y;
 
@@ -2104,6 +2142,10 @@ static void moveApple() {
 	usedSpecial = false;
 }
 static void updateApple(int x, int y) {
+	if (autoPilot) {
+		totalPathN[0] = 0;
+		plotCourse(0);
+	}
 	int oldx = apple.x;
 	int oldy = apple.y;
 	apple.x = x;
@@ -2113,6 +2155,10 @@ static void updateApple(int x, int y) {
 }
 static void setApple(int player, int x, int y) {
 	if (abs(player) > num_bikes) return;
+	if (autoPilot) {
+		totalPathN[0] = 0;
+		plotCourse(0);
+	}
 	int oldx = apple.x;
 	int oldy = apple.y;
 	apple.x = x;
@@ -2343,10 +2389,10 @@ static void printScore() {
 	if (!options[7]) {
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[0;0HScore: ");
 		char scores[12];
-		for (int i = 0; i < num_bikes; i++) {
+		for (int i = 0; i < numPlayers(); i++) {
 			snprintf(scores,sizeof(scores),"%s%d", textColors[i],score[i]);
 			strcat(mystring,scores);
-			if (i < num_bikes - 1) { snprintf(scores,sizeof(scores)," %s- ",WHITE); strcat(mystring,scores); }
+			if (i < numPlayers() - 1) { snprintf(scores,sizeof(scores)," %s- ",WHITE); strcat(mystring,scores); }
 		}
 		myprintf(mystring);
 	} else {
@@ -2371,15 +2417,21 @@ static void printScore() {
 	else { 
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[1;0H%sYou are %salive%s! ",WHITE,GREEN,WHITE);
 		myprintf(mystring);
-		if (everyoneElseIsDead()) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[6;0HGet %d more points!",theHighest() - score[myNum] + 1); myprintf(mystring); }
 	}
-	if (!options[3]) {
-		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[2;0HHold %s%s to move Faster.",RED,WHITE);
-		myprintf(mystring);
-	}
-	if (!options[4]) {
-		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[3;0HHold %s%s to move Slower.",YELLOW,WHITE);
-		myprintf(mystring);
+	if (!sprites[myNum].dead) {
+		if (!options[3]) {
+			clearString(); snprintf(mystring,sizeof(mystring),"\x1b[2;0HHold %s%s to move Faster.",RED,WHITE);
+			myprintf(mystring);
+		}
+		if (!options[4]) {
+			clearString(); snprintf(mystring,sizeof(mystring),"\x1b[3;0HHold %s%s to move Slower.",YELLOW,WHITE);
+			myprintf(mystring);
+		}
+	} else {
+		if (actual_bikes == 1) {
+			snprintf(mystring,sizeof(mystring),"\x1b[2;0HPress %s%s to forfeit.",RED,WHITE);
+			myprintf(mystring);
+		}
 	}
 	if (!options[5]) {
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[4;0HPress %s%s to teleport the apple once.",GREEN,WHITE);
@@ -2388,16 +2440,17 @@ static void printScore() {
 	if (options[6]) {
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[5;0HPress  to go in reverse."); myprintf(mystring);
 	}
-	int x = 7;
-	if (options[6]) x = 8;
-	for (int i = actual_bikes; i < num_bikes; i++) {
+	if (everyoneElseIsDead(myNum)) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[6;0HGet %d more points!",theHighest() - score[myNum] + 1); myprintf(mystring); }
+	int x = 8;
+	if (options[6]) x = 9;
+	for (int i = actual_bikes; i < numPlayers(); i++) {
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s has joined the game.",x + i - actual_bikes,textColors[i],sprites[i].username,WHITE);
 		myprintf(mystring);
 	}
 	int screenScore = totalSpace;
 	if (options[4]) screenScore *= 1.25;
 	if (options[5]) screenScore *= 1.25;
-	snprintf(mystring,sizeof(mystring),"\x1b[6;0H%sScreen Score: %d",WHITE,screenScore);
+	snprintf(mystring,sizeof(mystring),"\x1b[7;0H%sScreen Score: %d",WHITE,screenScore);
 	if ((unsigned int)screenScore > highScore) snprintf(mystring,sizeof(mystring),"\x1b[6;0HScreen Score: %s%d",RAINBOW,screenScore);
 	myprintf(mystring);
 	if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[5;0Hpathpos: %d currentpath: %d",pathPos[myNum],currentPath[myNum]); myprintf(mystring); }
@@ -2983,47 +3036,48 @@ static void gameOptions() {
 static void moveSprites() {
 //---------------------------------------------------------------------------------
 	int i;
-	for(i = 0; i < num_bikes; i++) {
+	for(i = 0; i < numPlayers(); i++) {
 		if (sprites[i].dead || !timeDiff(i)) continue;
 		frameTicks[i] = svcGetSystemTick();
 		int oldxdx = sprites[i].dx;
 		int oldydy = sprites[i].dy;
-		if (i == myNum && autoPilot) {
-			if (totalPathN < 2 && plotting) continuePlotting(i);
-			else if (totalPathN < 1) plotCourse(myNum);
-			if (totalPathN > 0) {
-				totalPathN--;
-				int myx = totalPath[totalPathN].x - (sprites[myNum].x >> 8);
-				int myy = totalPath[totalPathN].y - (sprites[myNum].y >> 8);
+		int bc = toBot(i);
+		if ((i > 0 && i != myNum && i < currentBots) || (autoPilot && i == myNum)) {
+			if (totalPathN[bc] < 2 && plotting[bc]) showPlotMovement(bc);
+			else if (totalPathN[bc] < 1) plotCourse(bc);
+			if (totalPathN[bc] > 0) {
+				totalPathN[bc]--;
+				int myx = totalPath[bc][totalPathN[bc]].x - (sprites[i].x >> 8);
+				int myy = totalPath[bc][totalPathN[bc]].y - (sprites[i].y >> 8);
 				if (myx == 0 && myy == 0) {
-					totalPathN--;
-					myx = totalPath[totalPathN].x - (sprites[myNum].x >> 8);
-					myy = totalPath[totalPathN].y - (sprites[myNum].y >> 8);
+					totalPathN[bc]--;
+					myx = totalPath[bc][totalPathN[bc]].x - (sprites[i].x >> 8);
+					myy = totalPath[bc][totalPathN[bc]].y - (sprites[i].y >> 8);
 				}
 				if (abs(myx) != 2 && abs(myy) != 2) { 
-					sprites[myNum].speed = 90;
+					//sprites[i].speed = 90;
 					if (abs(myx) >= 398) {
-						sprites[myNum].dy = 0;
-						if (sprites[myNum].x >> 8 <= 2) sprites[myNum].dx = bikeSpeed * -1;
-						else if (sprites[myNum].x >> 8 >= 398) sprites[myNum].dx = bikeSpeed;
+						sprites[i].dy = 0;
+						if (sprites[i].x >> 8 <= 2) sprites[i].dx = bikeSpeed * -1;
+						else if (sprites[i].x >> 8 >= 398) sprites[i].dx = bikeSpeed;
 					} else if (abs(myy) >= 238) {
-						if (sprites[myNum].y >> 8 <= 2) sprites[myNum].dy = bikeSpeed * -1;
-						else if (sprites[myNum].y >> 8 >= 237) sprites[myNum].dy = bikeSpeed;
+						if (sprites[i].y >> 8 <= 2) sprites[i].dy = bikeSpeed * -1;
+						else if (sprites[i].y >> 8 >= 237) sprites[i].dy = bikeSpeed;
 					}
 				}
 				if (myx == 0 || myy == 0) {
 					if (myx == 2) {
-						sprites[myNum].dy = 0;
-						sprites[myNum].dx = bikeSpeed;
-					} else if (myx == -2) { sprites[myNum].dy = 0; sprites[myNum].dx = -1 * bikeSpeed; }
-					else if (myy == 2) { sprites[myNum].dx = 0; sprites[myNum].dy = bikeSpeed; }
-					else if (myy == -2) { sprites[myNum].dx = 0; sprites[myNum].dy = -1 * bikeSpeed; }
+						sprites[i].dy = 0;
+						sprites[i].dx = bikeSpeed;
+					} else if (myx == -2) { sprites[i].dy = 0; sprites[i].dx = -1 * bikeSpeed; }
+					else if (myy == 2) { sprites[i].dx = 0; sprites[i].dy = bikeSpeed; }
+					else if (myy == -2) { sprites[i].dx = 0; sprites[i].dy = -1 * bikeSpeed; }
 				}
 				else {
 					/*snprintf(mystring,sizeof(mystring),"myx: %d myy: %d",myx,myy);
 					myprintf(mystring);*/
-					plotting = false;
-					totalPathN = 0;
+					plotting[bc] = false;
+					totalPathN[bc] = 0;
 				}
 			}
 			/*if (sprites[i].dy == oldydy * -1 || sprites[i].dx == oldxdx * -1) {
@@ -3031,12 +3085,14 @@ static void moveSprites() {
 				sprites[i].dx = oldxdx;
 			}*/
 		}
-		if (options[10] && i == myNum && rand() % 80 == 79) {
-			sprites[myNum].hole = (rand() % 3) + 1;
-			hole = sprites[myNum].hole;
-			msg.sprite = sprites[myNum];
-			lastSprite = svcGetSystemTick();
-			UDSSend(msg);
+		if (options[10] && (i == myNum || (i < currentBots && actual_bikes == 1)) && rand() % 80 == 79) {
+			sprites[i].hole = (rand() % 3) + 1;
+			hole = sprites[i].hole;
+			if (i == myNum) {
+				msg.sprite = sprites[i];
+				lastSprite = svcGetSystemTick();
+				UDSSend(msg);
+			}
 		}
 		else if (sprites[i].hole > 0) {
 			sprites[i].hole--;
@@ -3141,7 +3197,7 @@ static void moveSprites() {
 				}
 			}
 		}
-		if (autoPilot && plotting) {
+		if ((i > 0 && i != myNum && i < currentBots) || (autoPilot && i == myNum)) if (plotting[bc]) {
 			int dx = sprites[i].dx >> 8;
 			int dy = sprites[i].dy >> 8;
 			int x, y, h, n, j;
@@ -3149,9 +3205,9 @@ static void moveSprites() {
 			int ody = 0;
 			x = sprites[i].x >> 8;
 			y = sprites[i].y >> 8;
-			h = currentPath[myNum];
+			h = currentPath[i];
 			char offsets[20];
-			while ((dx != odx || dy != ody) && h != pathPos[myNum]) {
+			while ((dx != odx || dy != ody) && h != pathPos[i]) {
 				h--;
 				if (h < 0) h = 240 * 400 - 1;
 				odx = dx;
@@ -3172,15 +3228,15 @@ static void moveSprites() {
 				dx = (path[nexth][i].x >> 8) - x;
 				dy = (path[nexth][i].y >> 8) - y;
 				//snprintf(mystring,sizeof(mystring),"%d (%d %d):",currentPath[myNum] - h, dx, dy);
-				for (int i = 0; i < 8; i++) {
-					if (dx == 0 && getDirectionXTo(i,x,myNum) == x) continue;
-					if (dy == 0 && getDirectionYTo(i,y,myNum) == y) continue;
-					if (getDist(getDirectionXTo(i,x,myNum),getDirectionYTo(i,y,myNum),sanitizeX(x + dx),sanitizeY(y + dy)) <= 4) if (!getColor(getDirectionXTo(i,x,myNum),getDirectionYTo(i,y,myNum))) {
+				for (int k = 0; k < 8; k++) {
+					if (dx == 0 && getDirectionXTo(k,x,bc) == x) continue;
+					if (dy == 0 && getDirectionYTo(k,y,bc) == y) continue;
+					if (getDist(getDirectionXTo(k,x,i),getDirectionYTo(k,y,i),sanitizeX(x + dx),sanitizeY(y + dy)) <= 4) if (!getColor(getDirectionXTo(k,x,bc),getDirectionYTo(k,y,bc))) {
 						//snprintf(offsets,sizeof(offsets)," %d",i);
 						//strcat(mystring,offsets);
 						//writeColor(getDirectionXTo(i,x,myNum) + 1,getDirectionYTo(i,y,myNum) + 1,colors[8]);
-						cameFrom[getDirectionXTo(i,x,myNum)][getDirectionYTo(i,y,myNum)].x = sanitizeX(getDirectionXTo(i,x,myNum) + dx);
-						cameFrom[getDirectionXTo(i,x,myNum)][getDirectionYTo(i,y,myNum)].y = sanitizeY(getDirectionYTo(i,y,myNum) + dy);		
+						cameFrom[bc][getDirectionXTo(k,x,bc)][getDirectionYTo(k,y,bc)].x = sanitizeX(getDirectionXTo(k,x,bc) + dx);
+						cameFrom[bc][getDirectionXTo(k,x,bc)][getDirectionYTo(k,y,bc)].y = sanitizeY(getDirectionYTo(k,y,bc) + dy);		
 					}
 				}
 				//myprintf(mystring);
@@ -3197,46 +3253,46 @@ static void moveSprites() {
 			myprintf(mystring);*/
 			if (odx != dx || ody != dy) { //we are taking a turn, so we need to fix the corner's cameFrom.
 				if (dx == 0) {
-					cameFrom[sanitizeX(x + odx)][sanitizeY(y - dy)].x = sanitizeX(x + odx);
-					cameFrom[sanitizeX(x + odx)][sanitizeY(y - dy)].y = y;
+					cameFrom[bc][sanitizeX(x + odx)][sanitizeY(y - dy)].x = sanitizeX(x + odx);
+					cameFrom[bc][sanitizeX(x + odx)][sanitizeY(y - dy)].y = y;
 				} else if (dy == 0) {
-					cameFrom[sanitizeX(x - dx)][sanitizeY(y + ody)].x = x;
-					cameFrom[sanitizeX(x - dx)][sanitizeY(y + ody)].y = sanitizeY(y + ody);
+					cameFrom[bc][sanitizeX(x - dx)][sanitizeY(y + ody)].x = x;
+					cameFrom[bc][sanitizeX(x - dx)][sanitizeY(y + ody)].y = sanitizeY(y + ody);
 				}
 			}
 			//snprintf(mystring,sizeof(mystring),"%d (%d %d):",currentPath[myNum] - h, dx, dy);
-			for (int i = 0; i < 8; i++) {
-				if (dx == 0 && getDirectionXTo(i,x,myNum) == x) continue;
-				if (dy == 0 && getDirectionYTo(i,y,myNum) == y) continue;
-				if (getDist(getDirectionXTo(i,x,myNum),getDirectionYTo(i,y,myNum),sanitizeX(x + dx),sanitizeY(y + dy)) <= 4) if (!getColor(getDirectionXTo(i,x,myNum),getDirectionYTo(i,y,myNum))) {
+			for (int k = 0; k < 8; k++) {
+				if (dx == 0 && getDirectionXTo(k,x,i) == x) continue;
+				if (dy == 0 && getDirectionYTo(k,y,i) == y) continue;
+				if (getDist(getDirectionXTo(k,x,bc),getDirectionYTo(k,y,bc),sanitizeX(x + dx),sanitizeY(y + dy)) <= 4) if (!getColor(getDirectionXTo(k,x,bc),getDirectionYTo(k,y,bc))) {
 					//snprintf(offsets,sizeof(offsets)," %d",i);
 					//strcat(mystring,offsets);
 					//writeColor(getDirectionXTo(i,x,myNum) + 1,getDirectionYTo(i,y,myNum) + 1,colors[8]);
-					cameFrom[getDirectionXTo(i,x,myNum)][getDirectionYTo(i,y,myNum)].x = sanitizeX(getDirectionXTo(i,x,myNum) + dx);
-					cameFrom[getDirectionXTo(i,x,myNum)][getDirectionYTo(i,y,myNum)].y = sanitizeY(getDirectionYTo(i,y,myNum) + dy);		
+					cameFrom[bc][getDirectionXTo(k,x,bc)][getDirectionYTo(k,y,bc)].x = sanitizeX(getDirectionXTo(k,x,bc) + dx);
+					cameFrom[bc][getDirectionXTo(k,x,bc)][getDirectionYTo(k,y,bc)].y = sanitizeY(getDirectionYTo(k,y,bc) + dy);		
 				}
 			}
 			//myprintf(mystring);
 			//addPlacesIMoved(x,y);
-			cameFrom[x][y].x = 0;
-			cameFrom[x][y].y = 0;
+			cameFrom[bc][x][y].x = 0;
+			cameFrom[bc][x][y].y = 0;
 		}
 		sprites[i].x += sprites[i].dx;
 		sprites[i].y += sprites[i].dy;
 		//if (autoPilot) previousSteps += 2;
-		if (autoPilot && plotting) {
+		if ((i > 0 && i < currentBots) || (autoPilot && i == myNum)) if (plotting[bc]) {
 			int x = sprites[i].x >> 8;
 			int y = sprites[i].y >> 8;
 			//addPlacesIMoved(x,y);
-			cameFrom[x][y].x = 0;
-			cameFrom[x][y].y = 0;
-			for (int i = 4; i < 8; i++) {
-				cameFrom[getDirectionXTo(i,x,myNum)][getDirectionYTo(i,y,myNum)].x = x;
-				cameFrom[getDirectionXTo(i,x,myNum)][getDirectionYTo(i,y,myNum)].y = y;
+			cameFrom[bc][x][y].x = 0;
+			cameFrom[bc][x][y].y = 0;
+			for (int k = 4; k < 8; k++) {
+				cameFrom[bc][getDirectionXTo(k,x,bc)][getDirectionYTo(k,y,bc)].x = x;
+				cameFrom[bc][getDirectionXTo(k,x,bc)][getDirectionYTo(k,y,bc)].y = y;
 			}
 		}
 		if (autoPilot) {
-			if (oldBotSpeed != sprites[myNum].speed || sprites[i].dy != oldydy || sprites[i].dx != oldxdx) {
+			if (oldBotSpeed != sprites[myNum].speed || sprites[myNum].dy != oldydy || sprites[myNum].dx != oldxdx) {
 				oldBotSpeed = sprites[myNum].speed;
 				msg.sprite = sprites[myNum];
 				lastSprite = svcGetSystemTick();
@@ -3279,7 +3335,7 @@ static void moveSprites() {
 		if (currentPath[i] > 400 * 240) currentPath[i] = 0;
 		path[currentPath[i]][i].x = sprites[i].x;
 		path[currentPath[i]][i].y = sprites[i].y;
-		if (i == myNum && !sprites[myNum].dead) { //check my snake getting apple and collisions
+		if (((i > 0 && i < currentBots) || i == myNum) && !sprites[i].dead) { //check my snake getting apple and collisions
 			u32 color1 = getColor(sprites[i].x >> 8, sprites[i].y >> 8);
 			u32 color2 = getColor((sprites[i].x >> 8) + 1, (sprites[i].y >> 8) + 1);
 			if (svcGetSystemTick() - lastApple > TICKS_PER_MS * 15 * 6 * lagMult()) if (abs((sprites[i].x >> 8) - (apple.x >> 8)) <= 2 && abs((sprites[i].y >> 8) - (apple.y >> 8)) <= 2) {
@@ -3294,10 +3350,13 @@ static void moveSprites() {
 					sprites[i].length += growthRate;
 				}
 				if (sprites[i].length > 240 * 400) sprites[i].length = 240 * 400 - 1;
-				memset(replyScore,0,sizeof(replyScore[0]) * 10);
-				flash = svcGetSystemTick();
-				moveApple();
-				if (autoPilot) { plotting = false; totalPathN = 0; }
+				if (i == myNum) {
+					memset(replyScore,0,sizeof(replyScore[0]) * 10);
+					flash = svcGetSystemTick();
+					moveApple();
+				}
+				else { changeApple(); usedSpecial = false; }
+				if ((i < currentBots) || (i == myNum && autoPilot)) { plotting[i] = false; totalPathN[i] = 0; }
 				if (debugging) myprintf("Got apple.");
 			}
 			else if (getLength(i) < 5) {} //don't die if game just started
@@ -3306,13 +3365,23 @@ static void moveSprites() {
 				dead2 = color2;
 				lastDead = i;
 				sprites[i].dead = true;
-				msg.sprite = sprites[i];
-				memset(replySprite,0,sizeof(replySprite[0]) * 10);
-				lastSprite = svcGetSystemTick();
-				UDSSend(msg); //dead
-				if (options[9]) eraseLine(myNum);
+				if (i == myNum) {
+					msg.sprite = sprites[i];
+					memset(replySprite,0,sizeof(replySprite[0]) * 10);
+					lastSprite = svcGetSystemTick();
+					UDSSend(msg); //dead
+				}
+				if (options[9]) { 
+					eraseLine(i); 
+					for (int b = 0; b < currentBots; b++) {
+						if (!sprites[b].dead) { //a snake died and disappeared, so the bots need to rescan the area.
+							totalPathN[b] = 0;
+							plotting[b] = false;
+						}
+					}
+				}
 			}
-			else overwriteSprite(sprites[myNum].x >> 8, sprites[myNum].y >> 8, 2, 2, myNum);
+			else overwriteSprite(sprites[i].x >> 8, sprites[i].y >> 8, 2, 2, i);
 			ignoreDeath = false;
 		}
 	}
@@ -3343,8 +3412,8 @@ static void sceneRender(void) {
 		if (options[0]) drawWall(7);
 	}
 	if (!options[7] && !getColor(apple.x >> 8, apple.y >> 8)) drawSprite(apple.x >> 8, apple.y >> 8, 2, 2, 8);
-	for(i = 0; i < num_bikes; i++) {
-		if (i < actual_bikes) { 
+	for(i = 0; i < numPlayers(); i++) {
+		if (i < numPlayers()) { 
 			if (!sprites[i].dead) drawSprite( sprites[i].x >> 8, sprites[i].y >> 8, 2, 2, getImg(i));
 			if ((path[currentPath[i]][i].x >> 8) != (sprites[i].x >> 8) || (path[currentPath[i]][i].y >> 8) != (sprites[i].y >> 8)) {
 				currentPath[i]++;
@@ -3354,15 +3423,17 @@ static void sceneRender(void) {
 		}
 		int x = path[pathPos[i]][i].x >> 8;
 		int y = path[pathPos[i]][i].y >> 8;
-		if (autoPilot && !inOpenSet(x,y)) {
-			for (int k = 4; k < 8; k++) {
-				int nx = getDirectionXTo(k,x,myNum);
-				int ny = getDirectionYTo(k,y,myNum);
-				if (!getColor(nx,ny) && cameFrom[nx][ny].x && cameFrom[nx][ny].y) {
-					addOpenSet(x,y);
-					cameFrom[x][y].x = nx;
-					cameFrom[x][y].y = ny;
-					break;
+		for (int b = 0; b < currentBots; b++) {
+			if (!inOpenSet(x,y,b)) {
+				for (int k = 4; k < 8; k++) {
+					int nx = getDirectionXTo(k,x,b);
+					int ny = getDirectionYTo(k,y,b);
+					if (!getColor(nx,ny) && cameFrom[b][nx][ny].x && cameFrom[b][nx][ny].y) {
+						addOpenSet(x,y,b);
+						cameFrom[b][x][y].x = nx;
+						cameFrom[b][x][y].y = ny;
+						break;
+					}
 				}
 			}
 		}
@@ -3789,6 +3860,7 @@ void uds_test()
 			else strncpy(myName,overwriteName,sizeof(myName));
 
 			if (!hosting) {
+				currentBots = 1;
 				myNum = constatus.total_nodes - 1;
 				num_bikes = constatus.total_nodes;
 
@@ -3850,7 +3922,7 @@ void uds_test()
 		debugHold = false;
 		errorQuit = 0;
 		if (num_bikes < 1) num_bikes = 1;
-		for (int i = 0; i < num_bikes; i++) {
+		for (int i = 0; i < numPlayers(); i++) {
 			score[i] = 0;
 		}
 		if (!inGame) setSprites();
@@ -3908,6 +3980,7 @@ void uds_test()
 							clearString(); snprintf(mystring,sizeof(mystring),"node_bitmask=0x%x\n", (unsigned int)constatus.total_nodes);
 							myprintf(mystring);
 						}
+						currentBots = 1;
 						clearString(); snprintf(mystring,sizeof(mystring),"%s%s has joined as %s%s\n",textColors[num_bikes],sprites[num_bikes].username,colorNames[num_bikes],WHITE);
 						myprintf(mystring);
 						num_bikes = constatus.total_nodes;
@@ -4005,6 +4078,7 @@ void uds_test()
 									udsGetNodeInfoUsername(&tmpnode,&sprites[num_bikes].username);
 									if (!sprites[num_bikes].node) sprites[num_bikes].node = constatus.total_nodes;
 									connectionEstablished = true;
+									currentBots = 1;
 									clearString(); snprintf(mystring,sizeof(mystring),"%s%s has joined as %s%s\n",textColors[num_bikes],sprites[num_bikes].username,colorNames[num_bikes],WHITE);
 									myprintf(mystring);
 								}
@@ -4115,6 +4189,7 @@ void uds_test()
 							myprintf(mystring);
 						}
 						if (!hosting) {
+							currentBots = 1;
 							myNum = constatus.cur_NetworkNodeID - 1;
 							num_bikes = constatus.total_nodes;
 							sprites[myNum].image = myNum;
@@ -4185,7 +4260,7 @@ void uds_test()
 		oldbikes = num_bikes;
 		myconsoleClear();
 		// Main loop
-		for (int i = 0; i < num_bikes; i++) {
+		for (int i = 0; i < numPlayers(); i++) {
 			frameTicks[i] = svcGetSystemTick();
 		}
 		int oldApplex = 0;
@@ -4205,7 +4280,7 @@ void uds_test()
 		death = 0;
 		int oldsender = 0;
 		int oldspeed = 0;
-		for (int i = actual_bikes; i < NUM_SPRITES; i++) {
+		for (int i = numPlayers(); i < NUM_SPRITES; i++) {
 			sprites[i].dead = true;
 		}
 		oldCPos.dx = 0;
@@ -4227,15 +4302,31 @@ void uds_test()
 			erased[i] = false;
 		}
 		bool goDiag = false;
-		if (autoPilot) plotCourse(myNum);
+		for (int b = 0; b < currentBots; b++) {
+			if (b != 0) plotCourse(b);
+			else if (autoPilot && b == myNum) plotCourse(b);
+		}
+		forfeit = false;
 		while (aptMainLoop()) {
+			if (cheats || autoPilot) forfeit = true;
+			if (actual_bikes > 1) {
+				for (int b = 0; b < currentBots; b++) {
+					if (b != 0 && !sprites[b].dead) {
+						sprites[b].dead = true;
+						lastDead = b;
+						snprintf(mystring,sizeof(mystring),"%s%s%s has left the game.",textColors[b],sprites[b].username,WHITE);
+						myprintf(mystring);
+					}
+				}
+				currentBots = 1;
+			}
 			totalSpace = 0;
-			for (int i = 0; i < actual_bikes; i++) {
+			for (int i = 0; i < numPlayers(); i++) {
 				totalSpace += getLength(i);
 			}
 			if (totalSpace >= 24000) {
 				int sanityCheck = 0;
-				for (int i = 0; i < actual_bikes; i++) {
+				for (int i = 0; i < numPlayers(); i++) {
 					sanityCheck += sprites[i].length;
 				}
 				if (sanityCheck >= 24000) { //Wow, the screen is actually filled.
@@ -4246,7 +4337,7 @@ void uds_test()
 					UDSSend(msg);
 				}
 			}
-			if (everyoneElseIsDead() && sprites[myNum].dead) break;
+			if (everyoneElseIsDead(myNum) && sprites[myNum].dead) break;
 			if (errorQuit != 0 && svcGetSystemTick() - errorQuit > TICKS_PER_SEC * 3) {
 				return;
 			}
@@ -4312,7 +4403,7 @@ void uds_test()
 			u32 kDown = hidKeysDown();
 			u32 kHeld = hidKeysHeld();
 			u32 kUp = hidKeysUp();
-			if (kDown & KEY_SELECT) showCameFrom();
+			if (kDown & KEY_SELECT) showCameFrom(1);
 			hidCircleRead(&cpos);
 
 			//Read the touch screen coordinates
@@ -4417,6 +4508,12 @@ void uds_test()
 			if (!options[3] && !autoPilot) { //A is enabled
 				if (kDown & KEY_A || kHeld & KEY_A) sprites[myNum].speed = 15;
 				else if (kUp & KEY_A) sprites[myNum].speed = 45;
+			}
+			if (actual_bikes == 1 && sprites[myNum].dead && kDown & KEY_A) {
+				forfeit = true;
+				for (int b = 1; b < currentBots; b++) {
+					sprites[b].dead = true;
+				}
 			}
 			if (!options[4] && !autoPilot) { //B is enabled
 				if (kDown & KEY_B || kHeld & KEY_B) sprites[myNum].speed = 90;
@@ -4587,6 +4684,16 @@ void uds_test()
 						}
 					}
 					sceneRender();
+					for (int b = 1; b < currentBots; b++) {
+						if (everyoneElseIsDead(b) && getHighestScore() == b) {
+							sprites[b].dead = true;
+							lastDead = b;
+						}
+						else if (plotting[b]) {
+							if (b != 0) continuePlotting(b);
+							else if (autoPilot) continuePlotting(b);
+						}
+					}
 					moveSprites();
 					if(actual_size >= sizeof(Message))//If no data frame is available, udsPullPacket() will return actual_size=0.
 					{
@@ -4706,7 +4813,7 @@ void uds_test()
 								
 								if (abs(currentPath[img] - pathPos[img]) > 40) {
 									
-									if (msg.sprite.dead) {
+									if (msg.sprite.dead && !options[9]) {
 										lastDead = msg.sprite.image;
 										eraseOvershoot(msg.sprite);
 									}
@@ -4748,7 +4855,7 @@ void uds_test()
 								}
 								sprites[msg.sprite.image] = msg.sprite;
 							}
-							if (everyoneElseIsDead()) {
+							if (everyoneElseIsDead(myNum)) {
 								//if it's No apple mode...
 								if (options[7] && !sprites[myNum].dead) {
 									lastDead = myNum;
@@ -4774,7 +4881,7 @@ void uds_test()
 				gfxSwapBuffers();*/
 			}
 			keepConsole();
-			if (everyoneElseIsDead()) {
+			if (everyoneElseIsDead(myNum)) {
 				//no apple mode
 				if (options[7] && !sprites[myNum].dead) {
 					lastDead = myNum;
@@ -4787,20 +4894,23 @@ void uds_test()
 				//its normal
 				else if (getHighestScore() == myNum && allReplied(replyScore)) { lastDead = myNum; sprites[myNum].dead = true; sprites[myNum].node = myNode; msg.sprite = sprites[myNum]; memset(replySprite,0,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); UDSSend(msg); }
 			}
-			if (everyoneElseIsDead() && sprites[myNum].dead) break;
-			if (autoPilot && sprites[myNum].speed == 90) continuePlotting(myNum);
+			if (everyoneElseIsDead(myNum) && sprites[myNum].dead) break;
 		}
 
 		//This is the end of round screen...
 
-		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
-			C3D_FrameDrawOn(target);
-			C3D_TexBind(0, &spritesheet_tex);
-			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
-			for (int i = totalPathN - 10; i < totalPathN + 10; i++) {
-				overwriteSprite(totalPath[i].x,totalPath[i].y, 2, 2, 6);
-			}
-		C3D_FrameEnd(0);
+		if (debugging) {
+			C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+				C3D_FrameDrawOn(target);
+				C3D_TexBind(0, &spritesheet_tex);
+				C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
+				for (int k = 0; k < numBots; k++) {
+					for (int i = totalPathN[k] - 10; i < totalPathN[k] + 10; i++) {
+						overwriteSprite(totalPath[k][i].x,totalPath[k][i].y, 2, 2, 6);
+					}
+				}
+			C3D_FrameEnd(0);
+		}
 
 		myconsoleClear();
 		memset(replyChange,1,sizeof(replyChange[0]) * 10);
@@ -4879,10 +4989,30 @@ void uds_test()
 			//if it's not survival mode
 			if (!options[7]) {
 				if (itsATie()) myprintf("\x1b[0;0HIt's a TIE!");
-				else if (getHighestScore() == myNum) { iWin = true; snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sA winner is YOU!%s",RAINBOW,WHITE); myprintf(mystring); }
+				else if (getHighestScore() == myNum ) { 
+					if (forfeit) {
+						snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sYou forfeit the match!",WHITE);
+						myprintf(mystring);
+					}
+					else {
+						iWin = true; 
+						snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sA winner is YOU!%s",RAINBOW,WHITE);
+						myprintf(mystring); 
+					}
+				}
 				else { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[getHighestScore()],sprites[getHighestScore()].username,WHITE); myprintf(mystring); }
 			} else {
-				if (myNum == lastDead) { iWin = true; snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sA winner is YOU!%s",RAINBOW,WHITE); myprintf(mystring); }
+				if (myNum == lastDead) { 
+					if (forfeit) {
+						snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sYou forfeit the match!",WHITE);
+						myprintf(mystring);
+					}
+					else {
+						iWin = true; 
+						snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sA winner is YOU!%s",RAINBOW,WHITE); 
+						myprintf(mystring); 
+					}
+				}
 				else { snprintf(mystring,sizeof(mystring),"\x1b[0;0HYou LOSE! %s%s wins the game!%s",textColors[lastDead],sprites[lastDead].username,WHITE); myprintf(mystring); }
 			}
 			clearString(); snprintf(mystring,sizeof(mystring),"\x1b[1;0HScore: ");
@@ -4897,7 +5027,7 @@ void uds_test()
 				for (int i = 0; i < NUM_SPRITES; i++) {
 					memset(scores,'\0',sizeof(scores));
 					memset(k,'\0',sizeof(k));
-					if (i < num_bikes || i == 0) snprintf(scores,sizeof(scores),"%s%d ",textColors[i],score[i]);
+					if (i < numPlayers() || i == 0) snprintf(scores,sizeof(scores),"%s%d ",textColors[i],score[i]);
 					snprintf(k,sizeof(k),"%d ",score[i]);
 					//else snprintf(scores,sizeof(scores),"  ");
 					screen_get_string_size_wrap(&widths[i], &h, te, 0.5f, 0.5f, 320);
@@ -4923,12 +5053,12 @@ void uds_test()
 
 
 
-			snprintf(mystring,sizeof(mystring),"\x1b[5;0HScreen score: %d (%d %d) %d",totalSpace,sprites[myNum].dx >> 8,sprites[myNum].dy >> 8, totalPathN);
+			snprintf(mystring,sizeof(mystring),"\x1b[5;0HScreen score: %d",totalSpace);
 			myprintf(mystring);
 			if (iWin && allReplied(receivedScreenScore)) {
 				if ((unsigned int)totalSpace > highScore) setHighscore((unsigned int)totalSpace);
 			}
-			if (num_bikes == 1 && actual_bikes > 1) { numLeft++; num_bikes--; clearString(); snprintf(mystring,sizeof(mystring),"Everyone has left the game!"); myprintf(mystring); }
+			if (num_bikes == 1 && actual_bikes > 1) { currentBots = numBots; numLeft++; num_bikes--; clearString(); snprintf(mystring,sizeof(mystring),"Everyone has left the game!"); myprintf(mystring); }
 			
 			//Trigger to resend dropped packet of "Ready"
 			if (!allReplied(replyChange) && svcGetSystemTick() - lastChange > TICKS_PER_MS * 15 * 30 * lagMult()) {
@@ -5049,6 +5179,7 @@ void uds_test()
 				else if (msg.sprite.speed == 1111) { //join message
 					sprites[msg.sprite.image] = msg.sprite;
 					sprites[msg.sprite.image].node = msg.sprite.node;
+					currentBots = 1;
 					if (joinedNum != msg.sprite.image) { clearString(); snprintf(mystring,sizeof(mystring),"%s%s has joined as %s%s",textColors[msg.sprite.image],msg.sprite.username,colorNames[msg.sprite.image],WHITE); myprintf(mystring); }
 					joinedNum = msg.sprite.image;
 					if (myNum == 0) {
@@ -5116,6 +5247,15 @@ void uds_test()
 
 
 
+			if (kDown & KEY_L) {
+				if (autoPilot) {
+					autoPilot = false;
+					myprintf("Autopilot disengaged.");
+				} else {
+					autoPilot = true;
+					myprintf("Autopilot engaged");
+				}
+			}
 			if (myNum == 0 && kDown & KEY_SELECT) {
 				if (!ready[0]) { 
 					gameOptions(); 
@@ -5130,7 +5270,7 @@ void uds_test()
 				else myprintf("Can't edit modes when you are ready!");
 			}
 			//player pressed A
-			if (kDown & KEY_A || saveReady) {
+			if (kDown & KEY_A || saveReady || (autoPilot && actual_bikes > 1)) {
 				if (num_bikes <= 1) break; 
 				if (!ready[myNum] && svcGetSystemTick() - readyLock > TICKS_PER_SEC) { 
 					sprites[myNum].node = myNode; 
@@ -5194,6 +5334,7 @@ void uds_test()
 									memset(replyChange,1,sizeof(replyChange[0]) * 10);
 									memset(replySprite,1,sizeof(replySprite[0]) * 10);
 									if (myNum >= num_bikes) {
+										currentBots = 1;
 										myNum = num_bikes - 1;
 										clearString(); snprintf(mystring,sizeof(mystring),"  You are now %s%s%s!",textColors[myNum],colorNames[myNum],WHITE);
 										myprintf(mystring);
