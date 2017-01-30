@@ -80,8 +80,8 @@ build/source/main.o: source/main.c e:/devkitPro/libctru/include/3ds.h \
  e:/devkitPro/libctru/include/c3d/lightlut.h \
  e:/devkitPro/libctru/include/c3d/renderbuffer.h \
  e:/devkitPro/libctru/include/c3d/renderqueue.h source/lodepng.h \
- build/source/vshader_shbin.h build/source/textshader_shbin.h \
- build/source/bike_png.h build/source/qrcode_png.h
+ build/source/vshader_shbin.h build/source/bike_png.h \
+ build/source/qrcode_png.h
 
 e:/devkitPro/libctru/include/3ds.h:
 
@@ -250,8 +250,6 @@ e:/devkitPro/libctru/include/c3d/renderqueue.h:
 source/lodepng.h:
 
 build/source/vshader_shbin.h:
-
-build/source/textshader_shbin.h:
 
 build/source/bike_png.h:
 
