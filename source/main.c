@@ -874,6 +874,7 @@ void clearClosedSet(int s) {
     while (c->next) {
     	temp = c;
         c = c->next;
+        temp->next = NULL;
         free(temp);
     }
     free(c);
@@ -894,15 +895,16 @@ void remClosedSet(int x, int y, int s) {
         closedSetN[s]--;
         return;
     }
-    while (c->next) {
+    while (c->next != NULL) {
         prev = c;
         c = c->next;
         if (c->x == x && c->y == y) break;
     }
     if (c->x != x || c->y != y) return;
-    if (!prev) return;
+    if (prev == NULL) return;
     prev->next = c->next;
     free(c);
+    c = NULL;
     closedSetN[s]--;
 }
 bool openSetNotEmpty(int s) {
@@ -963,6 +965,7 @@ void clearOpenSet(int s) {
     while (c->next) {
     	temp = c;
         c = c->next;
+        temp->next = NULL;
         free(temp);
     }
     free(c);
@@ -983,15 +986,17 @@ void remOpenSet(int x, int y, int s) {
         openSetN[s]--;
         return;
     }
-    while (c->next) {
+    while (c->next != NULL) {
         prev = c;
         c = c->next;
         if (c->x == x && c->y == y) break;
     }
     if (c->x != x || c->y != y) return;
-    if (!prev) return;
+    if (prev == NULL) return;
     prev->next = c->next;
+    c->next = NULL;
     free(c);
+    c = NULL;
     openSetN[s]--;
 }
 int getDist(int x, int y, int dx, int dy) {
