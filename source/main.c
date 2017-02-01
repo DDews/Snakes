@@ -64,7 +64,7 @@
 	GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) | GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGBA8) | \
 	GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO))
 
-#define NUM_SPRITES 8
+#define NUM_SPRITES 10
 #define numBots 2
 
 #define SAMPLERATE 22050
@@ -256,7 +256,7 @@ typedef struct path_s {
 	int x, y;
 	struct path_s * next;
 }Path;
-Path path[200 * 120][8];
+Path path[200 * 120][NUM_SPRITES];
 
 //autopilot and ai
 u64 giveUpTimer[numBots] = {0,0};
@@ -544,15 +544,6 @@ static void rText(float x, float y, float scaleX, float scaleY, bool baseline, c
 		x += width;
 	}
 	renderText(x, y, .5f, .5f, true, out);
-}
-void drawText(int x, int y, u32 color, char *text) {
-
-	//C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
-		C3D_FrameDrawOn(target2);
-		C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &textprojection);
-		setTextColor(color); 
-		renderText(10.0f, 10.0f, .5f, .5f, false, "Hello World - working text rendering!\n");
-	//C3D_FrameEnd(0);
 }
 int consolei = 0;
 void myprintf(const char *format, ...) {
@@ -1122,7 +1113,7 @@ bool haveDirection() {
 	return false;
 }
 static int UDSSend(Message msg) {
-	if (!uds_enabled || debugHold) return 0;
+	if (!uds_enabled || debugHold || num_bikes <= 1) return 0;
 	msg.sender = myNum;
 	//if (debugging) { snprintf(mystring,sizeof(mystring),"sending speed: %d image: %d diag: %d",msg.sprite.speed,msg.sprite.image,msg.sprite.diag); myprintf(mystring); }
 	if (msg.sprite.image == myNum && msg.sprite.speed == 77) { msg.timestamp = lastScore; }
@@ -2151,7 +2142,7 @@ static int lagMult() {
 	return r > 0 ? r : 1;
 }
 static void UDSResend(bool replied[], Message msg) {
-	if (!uds_enabled) return;
+	if (!uds_enabled || num_bikes <= 1) return;
 	msg.sender = myNum;
 	sentMsg = msg;
 	ret=0;
@@ -2192,6 +2183,7 @@ static bool allReplied(bool replied[]) {
 	return true;
 }
 static int UDSDirect(int node, Message msg) {
+	if (!uds_enabled || num_bikes <= 1) return 0;
 	msg.sender = myNum;
 	ret=0;
 	if(conntype!=UDSCONTYPE_Spectator)//Spectators aren't allowed to send data.
@@ -3358,7 +3350,7 @@ static void moveSprites() {
 			int ody = 0;
 			x = sprites[i].x >> 8;
 			y = sprites[i].y >> 8;
-			h = currentPath[i];
+			h = currentPath[i] - 1;
 			//char offsets[20];
 			int o = 0;
 			while ((dx != odx || dy != ody) && h != pathPos[i] && o < 40) {
