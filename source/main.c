@@ -357,11 +357,12 @@ int numPlayers() {
 }
 int toBot(int s) {
 	if (autoPilot && s == myNum) return 0;
-	if (s > currentBots) return 0;
+	if (s >= currentBots) return 0;
 	return s;
 }
 int getBot(int s) {
 	if (s == 0) return myNum;
+	if (s >= currentBots) return currentBots - 1;
 	return s;
 }
 
@@ -1829,7 +1830,7 @@ bool checkPath(int s) {
 	return false;
 }
 void showPlotMovement(int s) {
-	snprintf(mystring,sizeof(mystring),"used memory: %zu",mallinfo().uordblks);
+	snprintf(mystring,sizeof(mystring),"free memory: %zu",mallinfo().fordblks);
 	myprintf(mystring);
 	if (sprites[getBot(s)].dead) return;
 	if (openSetN[s] == 0) {
@@ -3253,9 +3254,9 @@ static void moveSprites() {
 			int ox = (sprites[myNum].x + sprites[myNum].dx) >> 8;
 			int oy = (sprites[myNum].y + sprites[myNum].dy) >> 8;
 			if (ox >= 400) ox = 0;
-			else if (ox < 0) ox = 398;
+			else if (ox < 0) ox = 396;
 			if (oy >= 240) oy = 0;
-			else if (oy < 0) oy = 238;
+			else if (oy < 0) oy = 236;
 			if (getColor(ox,oy) != colors[8] && getColor(ox,oy)) {
 				if (sprites[myNum].dx > 0) nextMove = MOVE_RIGHT;
 				else if(sprites[myNum].dx < 0) nextMove = MOVE_LEFT;
@@ -3290,7 +3291,7 @@ static void moveSprites() {
 				}
 				y = oy;
 				x -= 2;
-				if (x < 0) x = 398;
+				if (x < 0) x = 396;
 				if (!sprites[myNum].dx && getColor(x,y) == 0) {
 					sprites[myNum].diag = 0;
 					sprites[myNum].dx = -1 * 2 << 8;
@@ -3302,7 +3303,7 @@ static void moveSprites() {
 				}
 				x = ox;
 				y -= 2;
-				if (y < 0) y = 238;
+				if (y < 0) y = 236;
 				if (!sprites[myNum].dy && getColor(x,y) == 0) {
 					sprites[myNum].diag = 0;
 					sprites[myNum].dx = 0;
@@ -3397,7 +3398,7 @@ static void moveSprites() {
 				}
 				//myprintf(mystring);
 				h++;
-				if (h >= 120 * 200 - 1) h = 0;
+				if (h >= 120 * 200) h = 0;
 			}
 			x = sprites[i].x >> 8;
 			y = sprites[i].y >> 8;
