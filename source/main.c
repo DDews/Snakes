@@ -83,6 +83,23 @@ static int textVtxArrayPos = 0;
 const static int BIKE_FAST = 15;
 const static int BIKE_NORMAL = 45;
 const static int BIKE_SLOW = 90;
+
+u8 appdata[0x14] = {0x69, 0x8a, 0x05, 0x5c};
+
+char tmpstr[256];
+
+size_t tmpbuf_size = 0x4000;
+u32 *tmpbuf = NULL;
+int hosting = 0;
+int readyToJoin = 0;
+udsNetworkStruct networkstruct;
+udsNetworkScanInfo *networks = NULL;
+udsNetworkScanInfo *network = NULL;
+size_t total_networks = 0;
+size_t actual_size;
+bool ignoreB = false;
+
+
 int texEnvMode = 0;
 u64 TICKS_PER_SEC = 268123480;
 u64 TICKS_PER_MS = 268123;
@@ -105,6 +122,9 @@ bool erased[11] = {false,false,false,false,false,false,false,false,false,false,f
 bool options[11] = {false,false,false,false,false,false,false,false,false,false,false};
 char optionNames[11][50] = {"Boundaries kill", "Tron mode", "Disable Diagonals", "Disable A", "Disable B", "Disable Y", "Enable R", "No apple", "Apples double length", "Disappear on death", "Occasional holes"};
 char loading[8][5] = {"","","","","","","",""};
+u32 recv_buffer_size = UDS_DEFAULT_RECVBUFSIZE;
+	u32 wlancommID = 0x783a9dab;//Unique ID, change this to your own.
+	char *passphrase = "dandewsudssnake.2.2 saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
 static DVLB_s* vshader_dvlb;
 static shaderProgram_s program;
 static int uLoc_projection;
@@ -258,7 +278,17 @@ typedef struct {
 	char username[50];
 }Sprite;
 
-
+typedef struct scene_s {
+    void (*init)(); //the initialization function of the scene
+    void (*update)(); //function pointer to update function
+    void (*draw)(); //function pointer to draw function
+    void (*finish)(); //function pointer to clean up function
+    struct scene_s * next; //next Scene in the stack
+}Scene;
+ 
+ 
+Scene *scenes = NULL; //the top of the stack
+ 
 typedef struct path_s {
 	int x, y;
 	struct path_s * next;
@@ -2417,7 +2447,6 @@ static void setSprites() {
 void print_constatus()
 {
 	ret=0;
-	u32 pos;
 	
 
 	//By checking the output of udsGetConnectionStatus you can check for nodes (including the current one) which just (dis)connected, etc.
@@ -2435,7 +2464,7 @@ void print_constatus()
 			myprintf("1=0x%x", (unsigned int)constatus.unk_x4);
 			myprintf("cur_NetworkNodeID=0x%x", (unsigned int)constatus.cur_NetworkNodeID);
 			myprintf("unk_xa=0x%x", (unsigned int)constatus.unk_xa);
-			for(pos=0; pos<(0x20>>2); pos++)myprintf("%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]);
+			for(u32 pos=0; pos<(0x20>>2); pos++)myprintf("%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]);
 			myprintf("\ntotal_nodes=0x%x", (unsigned int)constatus.total_nodes);
 			myprintf("max_nodes=0x%x", (unsigned int)constatus.max_nodes);
 			myprintf("node_bitmask=0x%x", (unsigned int)constatus.total_nodes);
@@ -3667,39 +3696,28 @@ void uds_test()
 	for (int i = 0; i < NUM_SPRITES; i++) {
 		memset(sprites[i].username,0,sizeof(sprites[i].username));
 	}
-	u8 data_channel = 1;
-	udsNetworkStruct networkstruct;
-	udsNetworkScanInfo *networks = NULL;
-	udsNetworkScanInfo *network = NULL;
-	size_t total_networks = 0;
+	networks = NULL;
+	network = NULL;
+	total_networks = 0;
 
-	u32 recv_buffer_size = UDS_DEFAULT_RECVBUFSIZE;
-	u32 wlancommID = 0x783a9dab;//Unique ID, change this to your own.
-	char *passphrase = "dandewsudssnake.2.2 saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
 
 	conntype = UDSCONTYPE_Client;
 
-	size_t actual_size;
-	u32 tmp=0;
-	u32 pos;
+	//u32 tmp=0;
 
-	u8 appdata[0x14] = {0x69, 0x8a, 0x05, 0x5c};
-
-	char tmpstr[256];
 
 	strncpy((char*)&appdata[4], "Test appdata.", sizeof(appdata)-1);
 
 	//myprintf("Successfully initialized.\n");
 
-	size_t tmpbuf_size = 0x4000;
-	u32 *tmpbuf = malloc(tmpbuf_size);
+	tmpbuf = malloc(tmpbuf_size);
 	if(tmpbuf==NULL)
 	{
 		myprintf("Failed to allocate tmpbuf for beacon data.\n");
 		return;
 	}
-	int hosting = 0;
-	int readyToJoin = 0;
+	hosting = 0;
+	readyToJoin = 0;
 
 	//gspWaitForVBlank();
 	//snprintf(mystring,sizeof(mystring),"\x1b[1;0H%sg %sy %sb %sm %sc %sdg %so %sp",GREEN, YELLOW, BLUE, MAGENTA, CYAN, DARKGREEN, ORANGE, PINK);
@@ -3710,7 +3728,7 @@ void uds_test()
 	myprintf(mystring);
 	myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press + to reset high score."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit."); myprintf(" ");
 	importUsername();
-	bool ignoreB = false;
+	ignoreB = false;
 	while (aptMainLoop()) {
 		hidScanInput();
 		u32 kDown = hidKeysDown();
@@ -3841,7 +3859,7 @@ void uds_test()
 					if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"network: total nodes = %u.\n", (unsigned int)network->network.total_nodes); myprintf(mystring); }
 
 
-					for(pos=0; pos<total_networks; pos++)
+					for(u32 pos=0; pos<total_networks; pos++)
 					{
 						network = &networks[pos];
 						if(!udsCheckNodeInfoInitialized(&network->nodes[0]))continue;
@@ -3882,7 +3900,7 @@ void uds_test()
 		if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"network: total nodes = %u.\n", (unsigned int)network->network.total_nodes); myprintf(mystring); }
 
 
-		for(pos=0; pos<NUM_SPRITES; pos++)
+		for(u32 pos=0; pos<NUM_SPRITES; pos++)
 		{
 			if(!udsCheckNodeInfoInitialized(&network->nodes[pos]))continue;
 
@@ -3900,10 +3918,10 @@ void uds_test()
 
 			if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"node%u username: %s\n", (unsigned int)pos, tmpstr); myprintf(mystring); }
 		}
-
+		u32 pos = 0;
 		for(pos=0; pos<10; pos++)
 		{
-			ret = udsConnectNetwork(&network->network, passphrase, strlen(passphrase)+1, &bindctx, UDS_BROADCAST_NETWORKNODEID, conntype, data_channel, recv_buffer_size);
+			ret = udsConnectNetwork(&network->network, passphrase, strlen(passphrase)+1, &bindctx, UDS_BROADCAST_NETWORKNODEID, conntype, 1, recv_buffer_size);
 			if(R_FAILED(ret))
 			{
 				clearString(); snprintf(mystring,sizeof(mystring),"udsConnectNetwork() returned 0x%08x.\n", (unsigned int)ret);
@@ -3924,14 +3942,14 @@ void uds_test()
 		if (debugging) myprintf("Connected.\n");
 
 
-		tmp = 0;
+		/*tmp = 0;
 		ret = udsGetChannel((u8*)&tmp);//Normally you don't need to use this.
 		if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"udsGetChannel() returned 0x%08x. channel = %u.\n", (unsigned int)ret, (unsigned int)tmp); myprintf(mystring); }
 		if(R_FAILED(ret))
 		{
 			CATASTROPHIC_FAILURE = true;
 			return;
-		}
+		}*/
 		con_type = 1;
 		
 	}
@@ -3941,7 +3959,7 @@ void uds_test()
 			udsGenerateDefaultNetworkStruct(&networkstruct, wlancommID, 0, 8); //only have room for 8 players.
 
 			myprintf("Creating the network...");
-			ret = udsCreateNetwork(&networkstruct, passphrase, strlen(passphrase)+1, &bindctx, data_channel, recv_buffer_size);
+			ret = udsCreateNetwork(&networkstruct, passphrase, strlen(passphrase)+1, &bindctx, 1, recv_buffer_size);
 			if(R_FAILED(ret))
 			{
 				clearString(); snprintf(mystring,sizeof(mystring),"udsCreateNetwork() returned 0x%08x.\n", (unsigned int)ret);
@@ -3950,7 +3968,7 @@ void uds_test()
 				return;
 			}
 
-			tmp = 0;
+			/*tmp = 0;
 			ret = udsGetChannel((u8*)&tmp);//Normally you don't need to use this.
 			if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"udsGetChannel() returned 0x%08x. channel = %u.\n", (unsigned int)ret, (unsigned int)tmp); myprintf(mystring); }
 			if(R_FAILED(ret))
@@ -3959,7 +3977,7 @@ void uds_test()
 				udsUnbind(&bindctx);
 				CATASTROPHIC_FAILURE = true;
 				return;
-			}
+			}*/
 		}
 		con_type = 0;
 		myNum = 0;
@@ -3990,7 +4008,6 @@ void uds_test()
 	{
 		if (debugging) myprintf("Constatus event signaled.");
 		ret=0;
-		u32 pos;
 		
 
 		//By checking the output of udsGetConnectionStatus you can check for nodes (including the current one) which just (dis)connected, etc.
@@ -4013,7 +4030,7 @@ void uds_test()
 				myprintf(mystring);
 				clearString(); snprintf(mystring,sizeof(mystring),"unk_xa=0x%x\n", (unsigned int)constatus.unk_xa);
 				myprintf(mystring);
-				for(pos=0; pos<(0x20>>2); pos++) { clearString(); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); } 
+				for(u32 pos=0; pos<(0x20>>2); pos++) { clearString(); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); } 
 				clearString(); snprintf(mystring,sizeof(mystring),"\ntotal_nodes=0x%x\n", (unsigned int)constatus.total_nodes);
 				myprintf(mystring);
 				clearString(); snprintf(mystring,sizeof(mystring),"max_nodes=0x%x\n", (unsigned int)constatus.max_nodes);
@@ -4140,7 +4157,7 @@ void uds_test()
 							myprintf(mystring);
 							clearString(); snprintf(mystring,sizeof(mystring),"unk_xa=0x%x\n", (unsigned int)constatus.unk_xa);
 							myprintf(mystring);
-							for(pos=0; pos<(0x20>>2); pos++) { clearString(); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); }
+							for(u32 pos=0; pos<(0x20>>2); pos++) { clearString(); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); }
 							clearString(); snprintf(mystring,sizeof(mystring),"\ntotal_nodes=0x%x\n", (unsigned int)constatus.total_nodes);
 							myprintf(mystring);
 							clearString(); snprintf(mystring,sizeof(mystring),"max_nodes=0x%x\n", (unsigned int)constatus.max_nodes);
@@ -4208,7 +4225,6 @@ void uds_test()
 
 					if(uds_enabled && udsWaitConnectionStatusEvent(false, false))
 					{
-						u32 pos;
 						
 
 						//By checking the output of udsGetConnectionStatus you can check for nodes (including the current one) which just (dis)connected, etc.
@@ -4232,7 +4248,7 @@ void uds_test()
 									myprintf(mystring);
 									clearString(); snprintf(mystring,sizeof(mystring),"unk_xa=0x%x\n", (unsigned int)constatus.unk_xa);
 									myprintf(mystring);
-									for(pos=0; pos<(0x20>>2); pos++) { clearString(); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); }
+									for(u32 pos=0; pos<(0x20>>2); pos++) { clearString(); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); }
 									clearString(); snprintf(mystring,sizeof(mystring),"\ntotal_nodes=0x%x\n", (unsigned int)constatus.total_nodes);
 									myprintf(mystring);
 									clearString(); snprintf(mystring,sizeof(mystring),"max_nodes=0x%x\n", (unsigned int)constatus.max_nodes);
@@ -4325,7 +4341,6 @@ void uds_test()
 			
 				if(uds_enabled && udsWaitConnectionStatusEvent(false, false))
 				{
-					u32 pos;
 					
 
 					//By checking the output of udsGetConnectionStatus you can check for nodes (including the current one) which just (dis)connected, etc.
@@ -4348,7 +4363,7 @@ void uds_test()
 							myprintf(mystring);
 							clearString(); snprintf(mystring,sizeof(mystring),"unk_xa=0x%x\n", (unsigned int)constatus.unk_xa);
 							myprintf(mystring);
-							for(pos=0; pos<(0x20>>2); pos++) { clearString(); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); }
+							for(u32 pos=0; pos<(0x20>>2); pos++) { clearString(); snprintf(mystring,sizeof(mystring),"%u=0x%x ", (unsigned int)pos+3, (unsigned int)constatus.unk_xc[pos]); myprintf(mystring); }
 							clearString(); snprintf(mystring,sizeof(mystring),"\ntotal_nodes=0x%x\n", (unsigned int)constatus.total_nodes);
 							myprintf(mystring);
 							clearString(); snprintf(mystring,sizeof(mystring),"max_nodes=0x%x\n", (unsigned int)constatus.max_nodes);
@@ -5618,6 +5633,70 @@ void uds_test()
 			}
 		}
 	}
+void pushScene(void (*init)(), void (*update)(), void (*draw)(), void (*finish)()) {
+    Scene *newScene = malloc(sizeof(Scene)); //allocate memory for a new scene in the SceneStack
+    if (newScene == NULL) {
+        showMemoryError();
+        return;
+    }
+    newScene->init = init; //initialization function for the scene
+    newScene->update = update; //input/update function for the scene
+    newScene->draw = draw; //draw function for the scene
+    newScene->finish = finish; //clean up function once the scene is popped
+    if (scenes == NULL) newScene->next = NULL;
+    else newScene->next = scenes; //next scene in the stack
+ 
+    scenes = newScene; //push this new scene to the top of the stack
+    if (scenes->init != NULL) scenes->init();
+}
+void popScene() {
+	if (scenes == NULL) return;
+    Scene *temp = scenes;
+    if (scenes->finish != NULL) scenes->finish(); //if there is a finish function, execute it
+    if (scenes->next != NULL) scenes = scenes->next; //set the top of the stack to be the next scene
+    else scenes = NULL;
+    if (scenes != NULL) {
+        if (scenes->init != NULL) scenes->init(); //if this new scene has an initialize function, execute it
+    }
+    temp->next = NULL;
+    free(temp); //free the current scene
+    temp = NULL;
+}
+void testInit() {
+	myconsoleClear();
+	myprintf("Uhhhhh....");
+}
+void testUpdate() {
+	hidScanInput();
+	u32 kDown = hidKeysDown();
+	if (kDown & KEY_A) {
+		popScene();
+		return;
+	}
+	keepConsole();
+}
+void testFinish() {
+	myconsoleClear();
+}
+void displayMessageInit() {
+	myprintf("testing one two three...");
+}
+void displayMessage() {
+	hidScanInput();
+	u32 kDown = hidKeysDown();
+	if (kDown & KEY_A) {
+		pushScene(testInit,testUpdate,NULL,testFinish);
+		return;
+	} 
+	if (kDown & KEY_START) {
+		popScene();
+		return;
+	}
+	keepConsole();
+}
+void displayMessageFinish() {
+	myconsoleClear();
+}
 //---------------------------------------------------------------------------------
 int main(int argc, char **argv) {
 //---------------------------------------------------------------------------------
@@ -5646,6 +5725,14 @@ int main(int argc, char **argv) {
 	// Initialize the scene
 	sceneInit();
 
+	//pushScene(displayMessageInit,displayMessage,NULL,displayMessageFinish);
+	/*while (aptMainLoop()) {
+		if (scenes == NULL) break;
+		if (scenes->update != NULL) scenes->update();
+		if (scenes == NULL) break;
+		if (scenes->draw != NULL) scenes->draw();
+		if (CATASTROPHIC_FAILURE) break;
+	}*/
 	ret = 0;
 	ret = udsInit(0x3000, NULL);//The sharedmem size only needs to be slightly larger than the total recv_buffer_size for all binds, with page-alignment.
 	uds_enabled = true;
