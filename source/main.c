@@ -80,9 +80,9 @@ static C3D_Tex* glyphSheets;
 static textVertex_s* textVtxArray;
 static int textVtxArrayPos = 0;
 
-const static int BIKE_FAST = 30;
-const static int BIKE_NORMAL = 90;
-const static int BIKE_SLOW = 180;
+const static int BIKE_FAST = 15;
+const static int BIKE_NORMAL = 45;
+const static int BIKE_SLOW = 90;
 int texEnvMode = 0;
 u64 TICKS_PER_SEC = 268123480;
 u64 TICKS_PER_MS = 268123;
@@ -1898,10 +1898,6 @@ void useSpecialOrGiveUp(int s) {
 
 void showPlotMovement(int s) {
 	keepConsole();
-	/*snprintf(mystring,sizeof(mystring),"%d: totalPath: %d open: %d closed: %d",s,totalPathN[s],openSetN[s],closedSetN[s]);
-	myprintf(mystring);*/
-	//snprintf(mystring,sizeof(mystring),"free memory: %zu",mallinfo().fordblks);
-	//myprintf(mystring);
 	if (sprites[getBot(s)].dead) return;
 	if (openSetN[s] == 0) {
 		useSpecialOrGiveUp(s);
@@ -1963,12 +1959,13 @@ u64 firstTimeDiff() {
 			smallest = frameTicks[i] + ((u64)sprites[i].speed * TICKS_PER_MS);
 		}
 	}
-	u64 r = smallest - (TICKS_PER_MS * 4) - svcGetSystemTick();
+	u64 r = smallest - svcGetSystemTick();
 	if (r > TICKS_PER_SEC) return (u64)0;
 	return r;
 }
 u64 timeDiff(int num) {
-	return (u64)(((svcGetSystemTick() - frameTicks[num]) / TICKS_PER_MS) / (u64)sprites[num].speed);
+	u64 speed = (u64)sprites[num].speed;
+	return (svcGetSystemTick() - frameTicks[num]) / TICKS_PER_MS / speed;
 }
 int livingBots() {
 	int r = 0;
@@ -3283,277 +3280,281 @@ static void moveSprites() {
 	int i;
 	for(i = 0; i < numPlayers(); i++) {
 		if (sprites[i].dead || !timeDiff(i)) continue;
-		frameTicks[i] = svcGetSystemTick();
-		int oldxdx = sprites[i].dx;
-		int oldydy = sprites[i].dy;
-		int bc = toBot(i);
-		if ((i > 0 && i != myNum && i < currentBots) || (autoPilot && i == myNum)) {
-			if (totalPathN[bc] < 2 && plotting[bc]) showPlotMovement(bc);
-			if (totalPathN[bc] > 0) {
-				totalPathN[bc]--;
-				while (totalPath[bc][totalPathN[bc]].x == 0 && totalPath[bc][totalPathN[bc]].y == 0 && totalPathN[bc] > 0) {
+		int times = (int)timeDiff(i);
+		if (times > 50) times = 50;
+		for (; times > 0 && !sprites[i].dead; times--) {
+			frameTicks[i] = svcGetSystemTick();
+			int oldxdx = sprites[i].dx;
+			int oldydy = sprites[i].dy;
+			int bc = toBot(i);
+			if ((i > 0 && i != myNum && i < currentBots) || (autoPilot && i == myNum)) {
+				if (totalPathN[bc] < 2 && plotting[bc]) showPlotMovement(bc);
+				if (totalPathN[bc] > 0) {
 					totalPathN[bc]--;
-				}
-				if (totalPathN[bc] == 0) { showPlotMovement(bc); totalPathN[bc]--; } 
-				int myx = totalPath[bc][totalPathN[bc]].x - (sprites[i].x >> 8);
-				int myy = totalPath[bc][totalPathN[bc]].y - (sprites[i].y >> 8);
-				if (myx == 0 && myy == 0) {
-					totalPathN[bc]--;
-					myx = totalPath[bc][totalPathN[bc]].x - (sprites[i].x >> 8);
-					myy = totalPath[bc][totalPathN[bc]].y - (sprites[i].y >> 8);
-				}
-				if (myx == 0 || myy == 0) {
-					if (myx == 2) {
-						sprites[i].dy = 0;
-						sprites[i].dx = bikeSpeed;
-					} else if (myx == -2) { sprites[i].dy = 0; sprites[i].dx = -1 * bikeSpeed; }
-					else if (myy == 2) { sprites[i].dx = 0; sprites[i].dy = bikeSpeed; }
-					else if (myy == -2) { sprites[i].dx = 0; sprites[i].dy = -1 * bikeSpeed; }
-				}
-				else {
-					if (abs(myx) != 2 && abs(myy) != 2) { 
-						//sprites[i].speed = 90;
-						if (abs(myx) >= 390) {
-							sprites[i].dy = 0;
-							if (sprites[i].x >> 8 <= 2) sprites[i].dx = bikeSpeed * -1;
-							else if (sprites[i].x >> 8 >= 398) sprites[i].dx = bikeSpeed;
-						} else if (abs(myy) >= 230) {
-							if (sprites[i].y >> 8 <= 2) sprites[i].dy = bikeSpeed * -1;
-							else if (sprites[i].y >> 8 >= 237) sprites[i].dy = bikeSpeed;
-						} else {
-							//snprintf(mystring,sizeof(mystring),"myx: %d myy: %d",myx,myy);
-							//myprintf(mystring);
-							//if (everyoneElseIsDead(bc)) useSpecialIfICan(bc);
-							//showCameFrom(bc);
-							totalPathN[bc] = 0;
-							plotting[bc] = false;
-						}
+					while (totalPath[bc][totalPathN[bc]].x == 0 && totalPath[bc][totalPathN[bc]].y == 0 && totalPathN[bc] > 0) {
+						totalPathN[bc]--;
 					}
-				}
-			}
-			/*if (sprites[i].dy == oldydy * -1 || sprites[i].dx == oldxdx * -1) {
-				sprites[i].dy = oldydy;
-				sprites[i].dx = oldxdx;
-			}*/
-		}
-		if (options[10] && (i == myNum || (i < currentBots && actual_bikes == 1)) && rand() % 80 == 79) {
-			sprites[i].hole = (rand() % 3) + 1;
-			hole = sprites[i].hole;
-			if (i == myNum) {
-				msg.sprite = sprites[i];
-				lastSprite = svcGetSystemTick();
-				UDSSend(msg);
-			}
-		}
-		else if (sprites[i].hole > 0) {
-			sprites[i].hole--;
-		}
-		if (cheats && !autoPilot) {
-			int ox = (sprites[myNum].x + sprites[myNum].dx) >> 8;
-			int oy = (sprites[myNum].y + sprites[myNum].dy) >> 8;
-			if (ox >= 400) ox = 0;
-			else if (ox < 0) ox = 396;
-			if (oy >= 240) oy = 0;
-			else if (oy < 0) oy = 236;
-			if (getColor(ox,oy) != colors[8] && getColor(ox,oy)) {
-				if (sprites[myNum].dx > 0) nextMove = MOVE_RIGHT;
-				else if(sprites[myNum].dx < 0) nextMove = MOVE_LEFT;
-				else if (sprites[myNum].dy > 0) nextMove = MOVE_DOWN;
-				else if (sprites[myNum].dy < 0) nextMove = MOVE_UP;
-				ox = sprites[myNum].x >> 8;
-				oy = sprites[myNum].y >> 8;
-				int x = ox;
-				int y = oy;
-				x += 2;
-				if (x > 398) x = 0;
-				if (!sprites[myNum].dx && getColor(x,y) == 0) {
-					sprites[myNum].diag = 0;
-					sprites[myNum].dx = 2 << 8;
-					sprites[myNum].dy = 0;
-					lastSprite = svcGetSystemTick();
-					memset(replySprite,0,sizeof(replySprite[0]) * 10);
-					msg.sprite = sprites[myNum];
-					UDSSend(msg);
-				} 
-				x = ox;
-				y += 2;
-				if (y > 238) y = 0;
-				if (!sprites[myNum].dy && getColor(x,y) == 0) {
-					sprites[myNum].diag = 0;
-					sprites[myNum].dx = 0;
-					sprites[myNum].dy = 2 << 8;
-					lastSprite = svcGetSystemTick();
-					memset(replySprite,0,sizeof(replySprite[0]) * 10);
-					msg.sprite = sprites[myNum];
-					UDSSend(msg);
-				}
-				y = oy;
-				x -= 2;
-				if (x < 0) x = 396;
-				if (!sprites[myNum].dx && getColor(x,y) == 0) {
-					sprites[myNum].diag = 0;
-					sprites[myNum].dx = -1 * 2 << 8;
-					sprites[myNum].dy = 0;
-					lastSprite = svcGetSystemTick();
-					memset(replySprite,0,sizeof(replySprite[0]) * 10);
-					msg.sprite = sprites[myNum];
-					UDSSend(msg);
-				}
-				x = ox;
-				y -= 2;
-				if (y < 0) y = 236;
-				if (!sprites[myNum].dy && getColor(x,y) == 0) {
-					sprites[myNum].diag = 0;
-					sprites[myNum].dx = 0;
-					sprites[myNum].dy = -1 * 2 << 8;
-					lastSprite = svcGetSystemTick();
-					memset(replySprite,0,sizeof(replySprite[0]) * 10);
-					msg.sprite = sprites[myNum];
-					UDSSend(msg);
-				}
-			}
-		}
-		if (i != myNum && sprites[i].diag && !autoPilot) { //auto diagonals for cpad
-			if (sprites[i].diag == NORTHEAST) {
-				if (sprites[i].dx) {
-					sprites[i].dy = sprites[i].dx * -1;
-					sprites[i].dx = 0;
-				} else {
-					sprites[i].dx = sprites[i].dy * -1;
-					sprites[i].dy = 0;
-				}
-			} else if (sprites[i].diag == SOUTHEAST) {
-				if (sprites[i].dx) {
-					sprites[i].dy = sprites[i].dx;
-					sprites[i].dx = 0;
-				} else {
-					sprites[i].dx = sprites[i].dy;
-					sprites[i].dy = 0;
-				}
-			} else if (sprites[i].diag == SOUTHWEST) {
-				if (sprites[i].dx) {
-					sprites[i].dy = sprites[i].dx * -1;
-					sprites[i].dx = 0;
-				} else {
-					sprites[i].dx = sprites[i].dy * -1;
-					sprites[i].dy = 0;
-				}
-			} else if (sprites[i].diag == NORTHWEST) {
-				if (sprites[i].dx) {
-					sprites[i].dy = sprites[i].dx;
-					sprites[i].dx = 0;
-				} else {
-					sprites[i].dx = sprites[i].dy;
-					sprites[i].dy = 0;
-				}
-			}
-		}
-		fixCameFroms(i);
-
-		sprites[i].x += sprites[i].dx;
-		sprites[i].y += sprites[i].dy;
-		
-		if (autoPilot) {
-			if (oldBotSpeed != sprites[myNum].speed || sprites[myNum].dy != oldydy || sprites[myNum].dx != oldxdx) {
-				oldBotSpeed = sprites[myNum].speed;
-				msg.sprite = sprites[myNum];
-				lastSprite = svcGetSystemTick();
-				memset(replySprite,0,sizeof(replySprite[0]) * 10);
-				UDSSend(msg);
-			}
-		}
-		//if (sprites[i].x >> 8 != totalPath[totalPathN].x && sprites[i].y >> 8 != totalPath[totalPathN].y) totalPathN--;
-		/*bool deadflag = false;
-		for (int i = 0; i < actual_bikes; i++) {
-			if (i != myNum && !sprites[i].dead && (sprites[i].x >> 8) + (sprites[i].dx >> 8) == (sprites[myNum].x >> 8) && (sprites[i].y >> 8) + (sprites[i].dy >> 8) == (sprites[myNum].y >> 8)) {
-				deadflag = true;
-				break;
-			}
-		}
-		if (deadflag) {
-			sprites[myNum].dead = true;
-			msg.sprite = sprites[myNum];
-			memset(replySprite,0,sizeof(replySprite[0]) * 10);
-			lastSprite = svcGetSystemTick();
-			UDSSend(msg);
-		}*/
-		if((sprites[i].x >> 8) < 2) sprites[i].x = 396 << 8; //screen wrap
-		else if (sprites[i].x > (396 << 8)) sprites[i].x = 2 << 8;
-
-		if((sprites[i].y >> 8) < 2) sprites[i].y = 236 << 8; //screen wrap
-		else if (sprites[i].y > (236 << 8)) sprites[i].y = 2 << 8;
-
-		/*while (getLength(i) > sprites[i].length) { //fix length: erase
-			drawSprite(path[pathPos[i]][i].x >> 8, path[pathPos[i]][i].y >> 8, 2, 2, 9);
-			pathPos[i]++;
-		}*/
-		if (growth[i]) growth[i]--;
-		else if (getLength(i) >= sprites[i].length) { //move tail
-			drawSprite(path[pathPos[i]][i].x >> 8, path[pathPos[i]][i].y >> 8, 2, 2, 9);
-			pathPos[i]++;
-			if (pathPos[i] >= 200 * 120) pathPos[i] = 0;
-		}
-		currentPath[i]++;
-		if (pathPos[i] >= 200 * 120) pathPos[i] = 0;
-		if (currentPath[i] >= 200 * 120) currentPath[i] = 0;
-		path[currentPath[i]][i].x = sprites[i].x;
-		path[currentPath[i]][i].y = sprites[i].y;
-		if (((i > 0 && i < currentBots) || i == myNum) && !sprites[i].dead) { //check my snake getting apple and collisions
-			u32 color1 = getColor(sprites[i].x >> 8, sprites[i].y >> 8);
-			u32 color2 = getColor((sprites[i].x >> 8) + 1, (sprites[i].y >> 8) + 1);
-			if (abs((sprites[i].x >> 8) - (apple.x >> 8)) <= 2 && abs((sprites[i].y >> 8) - (apple.y >> 8)) <= 2) {
-				if (svcGetSystemTick() - lastApple > TICKS_PER_MS * 15 * 6 * lagMult()) {
-					lastApple = svcGetSystemTick();
-					score[i]++;
-					if (options[8]) {
-						growth[i] += sprites[i].length;
-						sprites[i].length *= 2;
+					if (totalPathN[bc] == 0) { showPlotMovement(bc); totalPathN[bc]--; } 
+					int myx = totalPath[bc][totalPathN[bc]].x - (sprites[i].x >> 8);
+					int myy = totalPath[bc][totalPathN[bc]].y - (sprites[i].y >> 8);
+					if (myx == 0 && myy == 0) {
+						totalPathN[bc]--;
+						myx = totalPath[bc][totalPathN[bc]].x - (sprites[i].x >> 8);
+						myy = totalPath[bc][totalPathN[bc]].y - (sprites[i].y >> 8);
+					}
+					if (myx == 0 || myy == 0) {
+						if (myx == 2) {
+							sprites[i].dy = 0;
+							sprites[i].dx = bikeSpeed;
+						} else if (myx == -2) { sprites[i].dy = 0; sprites[i].dx = -1 * bikeSpeed; }
+						else if (myy == 2) { sprites[i].dx = 0; sprites[i].dy = bikeSpeed; }
+						else if (myy == -2) { sprites[i].dx = 0; sprites[i].dy = -1 * bikeSpeed; }
 					}
 					else {
-						growth[i] += growthRate;
-						sprites[i].length += growthRate;
-					}
-					if (sprites[i].length >= 120 * 200) sprites[i].length = 120 * 200 - 1;
-					if (i == myNum) {
-						memset(replyScore,0,sizeof(replyScore[0]) * 10);
-						flash = svcGetSystemTick();
-						moveApple();
-					}
-					else { 
-						changeApple(); 
-						for (int b = 0; b < numBots; b++) {
-							usedSpecial[b] = false;
+						if (abs(myx) != 2 && abs(myy) != 2) { 
+							//sprites[i].speed = 90;
+							if (abs(myx) >= 390) {
+								sprites[i].dy = 0;
+								if (sprites[i].x >> 8 <= 2) sprites[i].dx = bikeSpeed * -1;
+								else if (sprites[i].x >> 8 >= 398) sprites[i].dx = bikeSpeed;
+							} else if (abs(myy) >= 230) {
+								if (sprites[i].y >> 8 <= 2) sprites[i].dy = bikeSpeed * -1;
+								else if (sprites[i].y >> 8 >= 237) sprites[i].dy = bikeSpeed;
+							} else {
+								//snprintf(mystring,sizeof(mystring),"myx: %d myy: %d",myx,myy);
+								//myprintf(mystring);
+								//if (everyoneElseIsDead(bc)) useSpecialIfICan(bc);
+								//showCameFrom(bc);
+								totalPathN[bc] = 0;
+								plotting[bc] = false;
+							}
 						}
-		 			}
-					if ((i < currentBots) || (i == myNum && autoPilot)) { plotting[bc] = false; totalPathN[bc] = 0; }
-					if (debugging) myprintf("Got apple.");
+					}
 				}
+				/*if (sprites[i].dy == oldydy * -1 || sprites[i].dx == oldxdx * -1) {
+					sprites[i].dy = oldydy;
+					sprites[i].dx = oldxdx;
+				}*/
 			}
-			else if (getLength(i) < 5) {} //don't die if game just started
-			else if ((color1 != colors[8] && color2 != colors[8]) && (color1 > 0 || color2 > 0) && !ignoreDeath) {
-				dead = color1;
-				dead2 = color2;
-				lastDead = i;
-				sprites[i].dead = true;
-				if (debugging) showCameFrom(i);
+			if (options[10] && (i == myNum || (i < currentBots && actual_bikes == 1)) && rand() % 80 == 79) {
+				sprites[i].hole = (rand() % 3) + 1;
+				hole = sprites[i].hole;
 				if (i == myNum) {
 					msg.sprite = sprites[i];
-					memset(replySprite,0,sizeof(replySprite[0]) * 10);
 					lastSprite = svcGetSystemTick();
-					UDSSend(msg); //dead
+					UDSSend(msg);
 				}
-				if (options[9]) { 
-					eraseLine(i); 
-					for (int b = 0; b < currentBots; b++) {
-						if (!sprites[b].dead) { //a snake died and disappeared, so the bots need to rescan the area.
-							totalPathN[b] = 0;
-							plotting[b] = false;
-						}
+			}
+			else if (sprites[i].hole > 0) {
+				sprites[i].hole--;
+			}
+			if (cheats && !autoPilot) {
+				int ox = (sprites[myNum].x + sprites[myNum].dx) >> 8;
+				int oy = (sprites[myNum].y + sprites[myNum].dy) >> 8;
+				if (ox >= 400) ox = 0;
+				else if (ox < 0) ox = 396;
+				if (oy >= 240) oy = 0;
+				else if (oy < 0) oy = 236;
+				if (getColor(ox,oy) != colors[8] && getColor(ox,oy)) {
+					if (sprites[myNum].dx > 0) nextMove = MOVE_RIGHT;
+					else if(sprites[myNum].dx < 0) nextMove = MOVE_LEFT;
+					else if (sprites[myNum].dy > 0) nextMove = MOVE_DOWN;
+					else if (sprites[myNum].dy < 0) nextMove = MOVE_UP;
+					ox = sprites[myNum].x >> 8;
+					oy = sprites[myNum].y >> 8;
+					int x = ox;
+					int y = oy;
+					x += 2;
+					if (x > 398) x = 0;
+					if (!sprites[myNum].dx && getColor(x,y) == 0) {
+						sprites[myNum].diag = 0;
+						sprites[myNum].dx = 2 << 8;
+						sprites[myNum].dy = 0;
+						lastSprite = svcGetSystemTick();
+						memset(replySprite,0,sizeof(replySprite[0]) * 10);
+						msg.sprite = sprites[myNum];
+						UDSSend(msg);
+					} 
+					x = ox;
+					y += 2;
+					if (y > 238) y = 0;
+					if (!sprites[myNum].dy && getColor(x,y) == 0) {
+						sprites[myNum].diag = 0;
+						sprites[myNum].dx = 0;
+						sprites[myNum].dy = 2 << 8;
+						lastSprite = svcGetSystemTick();
+						memset(replySprite,0,sizeof(replySprite[0]) * 10);
+						msg.sprite = sprites[myNum];
+						UDSSend(msg);
+					}
+					y = oy;
+					x -= 2;
+					if (x < 0) x = 396;
+					if (!sprites[myNum].dx && getColor(x,y) == 0) {
+						sprites[myNum].diag = 0;
+						sprites[myNum].dx = -1 * 2 << 8;
+						sprites[myNum].dy = 0;
+						lastSprite = svcGetSystemTick();
+						memset(replySprite,0,sizeof(replySprite[0]) * 10);
+						msg.sprite = sprites[myNum];
+						UDSSend(msg);
+					}
+					x = ox;
+					y -= 2;
+					if (y < 0) y = 236;
+					if (!sprites[myNum].dy && getColor(x,y) == 0) {
+						sprites[myNum].diag = 0;
+						sprites[myNum].dx = 0;
+						sprites[myNum].dy = -1 * 2 << 8;
+						lastSprite = svcGetSystemTick();
+						memset(replySprite,0,sizeof(replySprite[0]) * 10);
+						msg.sprite = sprites[myNum];
+						UDSSend(msg);
 					}
 				}
 			}
-			else overwriteSprite(sprites[i].x >> 8, sprites[i].y >> 8, 2, 2, i);
-			ignoreDeath = false;
+			if (i != myNum && sprites[i].diag && !autoPilot) { //auto diagonals for cpad
+				if (sprites[i].diag == NORTHEAST) {
+					if (sprites[i].dx) {
+						sprites[i].dy = sprites[i].dx * -1;
+						sprites[i].dx = 0;
+					} else {
+						sprites[i].dx = sprites[i].dy * -1;
+						sprites[i].dy = 0;
+					}
+				} else if (sprites[i].diag == SOUTHEAST) {
+					if (sprites[i].dx) {
+						sprites[i].dy = sprites[i].dx;
+						sprites[i].dx = 0;
+					} else {
+						sprites[i].dx = sprites[i].dy;
+						sprites[i].dy = 0;
+					}
+				} else if (sprites[i].diag == SOUTHWEST) {
+					if (sprites[i].dx) {
+						sprites[i].dy = sprites[i].dx * -1;
+						sprites[i].dx = 0;
+					} else {
+						sprites[i].dx = sprites[i].dy * -1;
+						sprites[i].dy = 0;
+					}
+				} else if (sprites[i].diag == NORTHWEST) {
+					if (sprites[i].dx) {
+						sprites[i].dy = sprites[i].dx;
+						sprites[i].dx = 0;
+					} else {
+						sprites[i].dx = sprites[i].dy;
+						sprites[i].dy = 0;
+					}
+				}
+			}
+			fixCameFroms(i);
+
+			sprites[i].x += sprites[i].dx;
+			sprites[i].y += sprites[i].dy;
+			
+			if (autoPilot) {
+				if (oldBotSpeed != sprites[myNum].speed || sprites[myNum].dy != oldydy || sprites[myNum].dx != oldxdx) {
+					oldBotSpeed = sprites[myNum].speed;
+					msg.sprite = sprites[myNum];
+					lastSprite = svcGetSystemTick();
+					memset(replySprite,0,sizeof(replySprite[0]) * 10);
+					UDSSend(msg);
+				}
+			}
+			//if (sprites[i].x >> 8 != totalPath[totalPathN].x && sprites[i].y >> 8 != totalPath[totalPathN].y) totalPathN--;
+			/*bool deadflag = false;
+			for (int i = 0; i < actual_bikes; i++) {
+				if (i != myNum && !sprites[i].dead && (sprites[i].x >> 8) + (sprites[i].dx >> 8) == (sprites[myNum].x >> 8) && (sprites[i].y >> 8) + (sprites[i].dy >> 8) == (sprites[myNum].y >> 8)) {
+					deadflag = true;
+					break;
+				}
+			}
+			if (deadflag) {
+				sprites[myNum].dead = true;
+				msg.sprite = sprites[myNum];
+				memset(replySprite,0,sizeof(replySprite[0]) * 10);
+				lastSprite = svcGetSystemTick();
+				UDSSend(msg);
+			}*/
+			if((sprites[i].x >> 8) < 2) sprites[i].x = 396 << 8; //screen wrap
+			else if (sprites[i].x > (396 << 8)) sprites[i].x = 2 << 8;
+
+			if((sprites[i].y >> 8) < 2) sprites[i].y = 236 << 8; //screen wrap
+			else if (sprites[i].y > (236 << 8)) sprites[i].y = 2 << 8;
+
+			/*while (getLength(i) > sprites[i].length) { //fix length: erase
+				drawSprite(path[pathPos[i]][i].x >> 8, path[pathPos[i]][i].y >> 8, 2, 2, 9);
+				pathPos[i]++;
+			}*/
+			if (growth[i]) growth[i]--;
+			else if (getLength(i) >= sprites[i].length) { //move tail
+				drawSprite(path[pathPos[i]][i].x >> 8, path[pathPos[i]][i].y >> 8, 2, 2, 9);
+				pathPos[i]++;
+				if (pathPos[i] >= 200 * 120) pathPos[i] = 0;
+			}
+			currentPath[i]++;
+			if (pathPos[i] >= 200 * 120) pathPos[i] = 0;
+			if (currentPath[i] >= 200 * 120) currentPath[i] = 0;
+			path[currentPath[i]][i].x = sprites[i].x;
+			path[currentPath[i]][i].y = sprites[i].y;
+			if (((i > 0 && i < currentBots) || i == myNum) && !sprites[i].dead) { //check my snake getting apple and collisions
+				u32 color1 = getColor(sprites[i].x >> 8, sprites[i].y >> 8);
+				u32 color2 = getColor((sprites[i].x >> 8) + 1, (sprites[i].y >> 8) + 1);
+				if (abs((sprites[i].x >> 8) - (apple.x >> 8)) <= 2 && abs((sprites[i].y >> 8) - (apple.y >> 8)) <= 2) {
+					if (svcGetSystemTick() - lastApple > TICKS_PER_MS * 15 * 6 * lagMult()) {
+						lastApple = svcGetSystemTick();
+						score[i]++;
+						if (options[8]) {
+							growth[i] += sprites[i].length;
+							sprites[i].length *= 2;
+						}
+						else {
+							growth[i] += growthRate;
+							sprites[i].length += growthRate;
+						}
+						if (sprites[i].length >= 120 * 200) sprites[i].length = 120 * 200 - 1;
+						if (i == myNum) {
+							memset(replyScore,0,sizeof(replyScore[0]) * 10);
+							flash = svcGetSystemTick();
+							moveApple();
+						}
+						else { 
+							changeApple(); 
+							for (int b = 0; b < numBots; b++) {
+								usedSpecial[b] = false;
+							}
+			 			}
+						if ((i < currentBots) || (i == myNum && autoPilot)) { plotting[bc] = false; totalPathN[bc] = 0; }
+						if (debugging) myprintf("Got apple.");
+					}
+				}
+				else if (getLength(i) < 5) {} //don't die if game just started
+				else if ((color1 != colors[8] && color2 != colors[8]) && (color1 > 0 || color2 > 0) && !ignoreDeath) {
+					dead = color1;
+					dead2 = color2;
+					lastDead = i;
+					sprites[i].dead = true;
+					if (debugging) showCameFrom(i);
+					if (i == myNum) {
+						msg.sprite = sprites[i];
+						memset(replySprite,0,sizeof(replySprite[0]) * 10);
+						lastSprite = svcGetSystemTick();
+						UDSSend(msg); //dead
+					}
+					if (options[9]) { 
+						eraseLine(i); 
+						for (int b = 0; b < currentBots; b++) {
+							if (!sprites[b].dead) { //a snake died and disappeared, so the bots need to rescan the area.
+								totalPathN[b] = 0;
+								plotting[b] = false;
+							}
+						}
+					}
+				}
+				else overwriteSprite(sprites[i].x >> 8, sprites[i].y >> 8, 2, 2, i);
+				ignoreDeath = false;
+			}
 		}
 	}
 }

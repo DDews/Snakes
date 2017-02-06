@@ -34,6 +34,19 @@ DATA		:=	data
 INCLUDES	:=	include
 #ROMFS		:=	romfs
 
+APP_TITLE       := Snakes
+APP_DESCRIPTION := v0.2.4
+APP_AUTHOR      := Desynched
+
+ICON            := meta/icon.png
+BNR_IMAGE       := meta/banner.png
+BNR_AUDIO       := meta/audio.wav
+RSF_FILE        := meta/snakes.rsf
+
+export VERSION_MAJOR := 1
+export VERSION_MINOR := 0
+export VERSION_MICRO := 0
+
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
@@ -130,15 +143,21 @@ endif
 
 #---------------------------------------------------------------------------------
 all: $(BUILD)
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
+
+3dsx: $(BUILD)
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile 3dsx
+
+cia: $(BUILD)
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile cia
 
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
-	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
 #---------------------------------------------------------------------------------
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf
+	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf $(TARGET).cia
 
 
 #---------------------------------------------------------------------------------
@@ -149,6 +168,10 @@ DEPENDS	:=	$(OFILES:.o=.d)
 #---------------------------------------------------------------------------------
 # main targets
 #---------------------------------------------------------------------------------
+3dsx: $(OUTPUT).3dsx
+
+cia: $(OUTPUT).cia
+
 ifeq ($(strip $(NO_SMDH)),)
 $(OUTPUT).3dsx	:	$(OUTPUT).elf $(OUTPUT).smdh
 else
@@ -156,6 +179,19 @@ $(OUTPUT).3dsx	:	$(OUTPUT).elf
 endif
 
 $(OUTPUT).elf	:	$(OFILES)
+
+
+$(OUTPUT).cia:  $(OUTPUT).elf $(OUTPUT).smdh $(TARGET).bnr $(TOPDIR)/$(RSF_FILE)
+	@makerom -f cia -target t -exefslogo -o $@ \
+	  -elf $(OUTPUT).elf -rsf $(TOPDIR)/$(RSF_FILE) \
+	  -ver "$$(($(VERSION_MAJOR)*1024+$(VERSION_MINOR)*16+$(VERSION_MICRO)))" \
+	  -banner $(TARGET).bnr \
+	  -icon $(OUTPUT).smdh
+	@echo "built ... $(notdir $@)"
+
+$(TARGET).bnr:  $(TOPDIR)/$(BNR_IMAGE) $(TOPDIR)/$(BNR_AUDIO)
+	@bannertool makebanner -o $@ -i $(TOPDIR)/$(BNR_IMAGE) -a $(TOPDIR)/$(BNR_AUDIO)
+	@echo "built ... $@"
 
 #---------------------------------------------------------------------------------
 # you need a rule like this for each extension you use as binary data
