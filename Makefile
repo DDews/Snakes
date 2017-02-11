@@ -47,12 +47,12 @@ export VERSION_MAJOR := 1
 export VERSION_MINOR := 0
 export VERSION_MICRO := 0
 
-#---------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
 ARCH	:=	-march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 
-CFLAGS	:=	-g -Wall -O2 -mword-relocations \
+CFLAGS	:=	-g -Wall -Os -mword-relocations \
 			-fomit-frame-pointer -ffunction-sections \
 			$(ARCH)
 
