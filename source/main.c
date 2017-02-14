@@ -5372,7 +5372,7 @@ void roundEnd_update() {
 	}
 
 	//leaving the game
-	if (kDown & KEY_START) { popScene(); if (myNum) pushScene(send_quit_init,send_quit_update,NULL,send_quit_finish); return; }
+	if (kDown & KEY_START || kDown & KEY_B) { popScene(); if (myNum) pushScene(send_quit_init,send_quit_update,NULL,send_quit_finish); return; }
 
 	//someone left or joined
 	if(uds_enabled && udsWaitConnectionStatusEvent(false, false))
