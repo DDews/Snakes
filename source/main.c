@@ -2074,6 +2074,8 @@ static void moveApple() {
 	msg.sprite.speed = 77;
 	msg.sprite.x = apple.x;
 	msg.sprite.y = apple.y;
+	msg.sprite.dx = score[myNum];
+	lastScore = svcGetSystemTick();
 	UDSSend(msg);
 	for (int b = 0; b < numBots; b++) {
 		usedSpecial[b] = false;
@@ -5983,8 +5985,6 @@ void game_update() {
 				else if (msg.sprite.image == myNum) { if (msg.sprite.speed == 1001) { popScene(); pushScene(roundEnd_init,roundEnd_update,NULL,NULL); return; } if (msg.timestamp == lastSprite) replySprite[msg.sender] = true;  else if (debugging) { clearString(); snprintf(mystring,sizeof(mystring),"replySprite from %d: 0x%" PRIx64 " != 0x%" PRIx64,msg.sender,msg.timestamp,lastSprite); myprintf(mystring);} }
 				else if (msg.sprite.speed == 1001) {} //ignore.
 				else {
-					
-					
 					if (msg.sprite.image > num_bikes) { //someone has joined and we missed it...
 						num_bikes = msg.sprite.image + 1; 
 						for (int i = actual_bikes; i < NUM_SPRITES; i++) { 
@@ -6248,7 +6248,7 @@ void connect_update() {
 		if(pos==10) { was_in_game = true; popScene(); return; }
 
 		myprintf("Connected.");
-
+		myprintf("Please wait for round to end.");
 
 		/*tmp = 0;
 		ret = udsGetChannel((u8*)&tmp);//Normally you don't need to use this.
