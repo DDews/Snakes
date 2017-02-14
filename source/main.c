@@ -23,7 +23,7 @@
 #include "bike_png.h"
 #include "qrcode_png.h"
 
-#define VERSION "0.2.4"
+#define VERSION "0.2.5"
 
 #define CLEAR_COLOR 0x000000FF
 
@@ -166,7 +166,7 @@ char optionNames[11][50] = {"Boundaries kill", "Tron mode", "Disable Diagonals",
 char loading[8][10] = {"","","","","","","",""};;
 u32 recv_buffer_size = UDS_DEFAULT_RECVBUFSIZE;
 u32 wlancommID = 0x783a9dab;//Unique ID, change this to your own.
-char passphrase[100] = "dandewsudssnake.2.4 saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
+char passphrase[100] = "dandewsudssnake.2.5 saadistheman";//Change this passphrase to your own. The input you use for the passphrase doesn't matter since it's a raw buffer.
 static DVLB_s* vshader_dvlb;
 static shaderProgram_s program;
 static int uLoc_projection;
