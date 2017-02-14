@@ -41,16 +41,24 @@
 
 #define ESC(x) "\x1b[" #x
 #define RED     "!.r"
+#define DARKRED "!.R"
 #define GREEN   "!.g"
+#define DARKERGREEN "!.G"
 #define YELLOW  "!.y"
 #define DARKYELLOW  "!.j"
 #define BLUE    "!.b"
+#define DARKBLUE "!.B"
 #define MAGENTA "!.m"
+#define DARKMAGENTA "!.M"
 #define CYAN    "!.c"
+#define DARKCYAN "!.C"
 #define ORANGE  "!.o"
+#define DARKORANGE "!.O"
 #define DARKGREEN "!.d"
 #define PINK "!.p"
+#define DARKPINK "!.P"
 #define WHITE "!.w"
+#define GREY "!.W"
 #define BLACK "!.z"
 #define RAINBOW "!.u"
 
@@ -88,10 +96,23 @@ u8 appdata[0x14] = {0x69, 0x8a, 0x05, 0x5c};
 
 char tmpstr[256];
 
+u64 stackTrace = 0;
+bool patchConsole = false;
 bool was_in_game = false;
 bool network_created = false;
 size_t tmpbuf_size = 0;
 u32 *tmpbuf = NULL;
+
+char gonOrOff[5];
+char gselectedColor[5];
+int gselected = 0;
+int gload = 0;
+int load = 0;
+bool redo = true;
+u64 glastLoad;
+u64 lastLoad;
+int specialSelection = -1;
+char botsColor[20];
 
 size_t beacon_size = 0x4000;
 u32 *beacon_msg = NULL;
@@ -139,8 +160,8 @@ bool uds_enabled = false;
 bool readyToStart = false;
 bool debugging = false;
 int numOptions = 11;
-bool erased[11] = {false,false,false,false,false,false,false,false,false,false,false};
-bool options[11] = {false,false,false,false,false,false,false,false,false,false,false};
+bool erased[11];
+bool options[11];
 char optionNames[11][50] = {"Boundaries kill", "Tron mode", "Disable Diagonals", "Disable A", "Disable B", "Disable Y", "Enable R", "No apple", "Apples double length", "Disappear on death", "Occasional holes"};
 char loading[8][10] = {"","","","","","","",""};;
 u32 recv_buffer_size = UDS_DEFAULT_RECVBUFSIZE;
@@ -203,9 +224,25 @@ int growth[10] = {40,40,40,40,40,40,40,40,40,40};
 int pathPos[10] = {0,0,0,0,0,0,0,0,0,0};
 int currentPath[10] = {1,1,1,1,1,1,1,1,1,1};
 
-bool ready[10] = {false, false, false, false, false, false, false, false, false, false};
+bool ready[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 int bikeSpeed = 2;
+static u32 darken(u32 color, float shade_factor) {
+	u32 r = color & (u32)0x00ff0000;
+	r >>= 16;
+	u32 g = color & (u32)0x0000ff00;
+	g >>= 8;
+	u32 b = color & (u32)0x000000ff;
+	return 0xff000000 | (u32)(r * (1 - shade_factor)) << 16 | (u32)(g * (1 - shade_factor)) << 8 | (u32)(b * (1 - shade_factor));
+}
+static u32 lighten(u32 color, float tint_factor) {
+	u32 r = color & (u32)0x00ff0000;
+	r >>= 16;
+	u32 g = color & (u32)0x0000ff00;
+	g >>= 8;
+	u32 b = color & (u32)0x000000ff;
+	return 0xff000000 | (u32)(r + (255 - r) * tint_factor) << 16 | (u32)(g + (255 - g) * tint_factor) << 8 | (u32)(b + (255 - b) * tint_factor);
+}
 static u32 HSL2RGB(float h, float sl, float l)
 {
     float v;
@@ -315,9 +352,14 @@ int numScenes = 0;
 
 
 typedef struct bot_s {
-	bool can_go_fast;
+	int can_go_fast;
 	int precision;
 	int patience;
+	int fudge_x;
+	int fudge_y;
+	int fudge_factor;
+	int difficulty;
+	u64 last_speed_change;
 }Bot;
 
 Bot bots[numBots];
@@ -376,6 +418,7 @@ bool replySprite[10] = {0,0,0,0,0,0,0,0,0,0};
 
 udsNodeInfo tmpnode;
 Result ret=0;
+u32 failure = 0;
 
 
 u32 gameOver = 0;
@@ -406,6 +449,8 @@ static float printy = 10.0;
 static float printx = 10.0;
 void pushScene(void (*initialization)(), void (*update)(), void (*draw)(), void (*finish)());
 void popScene();
+int getHighestScore();
+int dangerousNeighbors(int x, int y, int s);
 void game_init();
 void game_update();
 void connect_update();
@@ -416,6 +461,20 @@ void wait_for_player_init();
 void wait_for_player_update();
 void roundEnd_init();
 void roundEnd_update();
+void gameOptions_init();
+void gameOptions();
+void opponent_options_update();
+void opponent_options_init();
+void opponent_options_draw();
+void opponent_options_finish();
+void difficulty_menu_init();
+void difficulty_menu_update();
+void difficulty_menu_draw();
+void difficulty_menu_finish();
+void options_menu_init();
+void options_menu_update();
+void options_menu_draw();
+void options_menu_finish();
 void send_bike_init();
 void send_bike_update();
 void send_bike_finish();
@@ -456,7 +515,7 @@ void setOptions(unsigned int n) {
 
 int numPlayers() {
 	if (actual_bikes > 1) return actual_bikes;
-	return actual_bikes + currentBots - 1;
+	return actual_bikes + numOpponents;
 }
 int toBot(int s) {
 	if (autoPilot && s == myNum) return 0;
@@ -621,18 +680,31 @@ static void rText(float x, float y, float scaleX, float scaleY, bool baseline, c
 		renderText(x,y,.5f,.5f,true,out);
 		screen_get_string_size_wrap(&width, &height, out, 0.5f, 0.5f, 320);
 		x += width;
+		float dark = 0.2f;
 		if (out[position - 1] == 'r') setTextColor(0xff0000ff);
+		else if (out[position - 1] == 'R') setTextColor(darken(0xff0000ff,dark));
 		else if(out[position - 1] == 'g') setTextColor(colors[0] | 0xff000000);
+		else if(out[position - 1] == 'G') setTextColor(darken(colors[0] | 0xff000000,dark));
 		else if(out[position - 1] == 'y') setTextColor(0xff00ffe4);
+		else if(out[position - 1] == 'Y') setTextColor(darken(0xff00ffe4,dark));
 		else if(out[position - 1] == 'b') setTextColor(0xffff4e00);
+		else if(out[position - 1] == 'B') setTextColor(darken(0xffff4e00,dark));
 		else if(out[position - 1] == 'm') setTextColor(0xffff00fc);
+		else if(out[position - 1] == 'M') setTextColor(darken(0xffff00fc,dark));
 		else if(out[position - 1] == 'c') setTextColor(0xfff0ff00);
+		else if(out[position - 1] == 'C') setTextColor(darken(0xfff0ff00,dark));
 		else if(out[position - 1] == 'd') setTextColor(0xff2c7225);
+		else if(out[position - 1] == 'D') setTextColor(darken(0xff2c7225,dark));
 		else if(out[position - 1] == 'o') setTextColor(0xff0096ff);
+		else if(out[position - 1] == 'O') setTextColor(darken(0xff0096ff,dark));
 		else if(out[position - 1] == 'p') setTextColor(0xff827fff);
+		else if(out[position - 1] == 'P') setTextColor(darken(0xff827fff,dark));
 		else if(out[position - 1] == 'w') setTextColor(0xffffffff);
+		else if(out[position - 1] == 'W') setTextColor(darken(0xffffffff,dark));
 		else if(out[position - 1] == 'z') setTextColor(0xff000000);
+		else if(out[position - 1] == 'Z') setTextColor(0xff000000);
 		else if(out[position - 1] == 'j') setTextColor(0xff008275);
+		else if(out[position - 1] == 'J') setTextColor(darken(0xff008275,dark));
 		else if(out[position - 1] == 'u') setTextColor(HSL2RGB(rainbow,0.5,0.5));
 		memset(sub,0,sizeof(sub));
 		snprintf(sub,sizeof(sub),"%.*s",substringLength,out + position);
@@ -674,18 +746,31 @@ void keepXConsole() {
 				renderText(printx,printy,.5f,.5f,true,out);
 				screen_get_string_size_wrap(&width, &height, out, 0.5f, 0.5f, 320);
 				printx += width;
+				float dark = 0.2f;
 				if (out[position - 1] == 'r') setTextColor(0xff0000ff);
+				else if (out[position - 1] == 'R') setTextColor(darken(0xff0000ff,dark));
 				else if(out[position - 1] == 'g') setTextColor(colors[0] | 0xff000000);
+				else if(out[position - 1] == 'G') setTextColor(darken(colors[0] | 0xff000000,dark));
 				else if(out[position - 1] == 'y') setTextColor(0xff00ffe4);
+				else if(out[position - 1] == 'Y') setTextColor(darken(0xff00ffe4,dark));
 				else if(out[position - 1] == 'b') setTextColor(0xffff4e00);
+				else if(out[position - 1] == 'B') setTextColor(darken(0xffff4e00,dark));
 				else if(out[position - 1] == 'm') setTextColor(0xffff00fc);
+				else if(out[position - 1] == 'M') setTextColor(darken(0xffff00fc,dark));
 				else if(out[position - 1] == 'c') setTextColor(0xfff0ff00);
+				else if(out[position - 1] == 'C') setTextColor(darken(0xfff0ff00,dark));
 				else if(out[position - 1] == 'd') setTextColor(0xff2c7225);
+				else if(out[position - 1] == 'D') setTextColor(darken(0xff2c7225,dark));
 				else if(out[position - 1] == 'o') setTextColor(0xff0096ff);
+				else if(out[position - 1] == 'O') setTextColor(darken(0xff0096ff,dark));
 				else if(out[position - 1] == 'p') setTextColor(0xff827fff);
+				else if(out[position - 1] == 'P') setTextColor(darken(0xff827fff,dark));
 				else if(out[position - 1] == 'w') setTextColor(0xffffffff);
+				else if(out[position - 1] == 'W') setTextColor(darken(0xffffffff,dark));
 				else if(out[position - 1] == 'z') setTextColor(0xff000000);
+				else if(out[position - 1] == 'Z') setTextColor(0xff000000);
 				else if(out[position - 1] == 'j') setTextColor(0xff008275);
+				else if(out[position - 1] == 'J') setTextColor(darken(0xff008275,dark));
 				else if(out[position - 1] == 'u') setTextColor(HSL2RGB(rainbow,0.5,0.5));
 				memset(sub,0,sizeof(sub));
 				snprintf(sub,sizeof(sub),"%.*s",substringLength,out + position);
@@ -921,6 +1006,7 @@ struct { float left, right, top, bottom; } images[12] = {
 	{0.0f, 1.0f, 0.0f, 1.0f}, //qrcode
 };
 char textColors[10][12] = {GREEN, YELLOW, BLUE, MAGENTA, CYAN, DARKGREEN, ORANGE, PINK, RAINBOW, WHITE};
+char darkColors[10][12] = {DARKERGREEN, DARKYELLOW, DARKBLUE, DARKMAGENTA, DARKCYAN, DARKGREEN, DARKORANGE, DARKPINK, RAINBOW, GREY};
 char colorNames[10][12] = {"Green", "Yellow", "Blue", "Magenta", "Cyan", "Dark Green", "Orange", "Pink", "Rainbow", "Black"};
 
 u32 getNextColor(int x, int y) { // Thank you WolfVak for the code!
@@ -1135,21 +1221,35 @@ int getDist(int x, int y, int dx, int dy) {
 void addNode(int x, int y, int nx, int ny, int myGScore, int s) {
 	int ac = getBot(s);
 	gscore[s][nx][ny] = myGScore;
-	fscore[s][nx][ny] = myGScore + getDist(nx,ny,sprites[ac].x ,sprites[ac].y );
+	fscore[s][nx][ny] = myGScore + getDist(nx,ny,sprites[ac].x ,sprites[ac].y);
 }
 void addNodeToApple(int x, int y, int nx, int ny, int myGScore, int s) {
+	int danger = 1 + dangerousNeighbors(x,y,s);
 	cameFrom[s][nx][ny].x = x;
 	cameFrom[s][nx][ny].y = y;
 	gscore[s][nx][ny] = myGScore;
-	fscore[s][nx][ny] = myGScore + getDist(nx,ny,apple.x ,apple.y );
+	fscore[s][nx][ny] = myGScore + getDist(nx,ny,apple.x,apple.y) * danger;
 }
 void continueAddNodeToApple(int x, int y, int nx, int ny, int myGScore, int s) {
+	int danger = 1 + dangerousNeighbors(x,y,s);
 	cameFrom[s][nx][ny].x = x;
 	cameFrom[s][nx][ny].y = y;
 	gscore[s][nx][ny] = myGScore;
-	fscore[s][nx][ny] = myGScore + getDist(nx,ny,apple.x,apple.y);
+	fscore[s][nx][ny] = myGScore + getDist(nx,ny,apple.x,apple.y) * danger;
 }
 bool directions[4] = {false,false,false,false};
+int getDirectionYFor(int i, int y, int s, int f) {
+	f += 1;
+	if (i == 0) return sanitizeY(y - 2 * f);
+	else if (i == 1) return sanitizeY(y + 2 * f);
+	return sanitizeY(y);
+}
+int getDirectionXFor(int i, int x, int s, int f) {
+	f += 1;
+	if (i == 2) return sanitizeX(x - 2 * f);
+	else if (i == 3) return sanitizeX(x + 2 * f);
+	return sanitizeX(x);
+}
 int getDirectionY(int i, int s) {
 	if (i == 0) return sanitizeY(current[s].y - 2);
 	else if (i == 1) return sanitizeY(current[s].y + 2);
@@ -1183,7 +1283,7 @@ int getDirection(int s) {
 	int r = 0;
 	int smallest = INT_MAX;
 	for (int i = 0; i < 4; i++) {
-		if (directions[i] && getDist(getDirectionX(i,s), getDirectionY(i,s),sprites[ac].x , sprites[ac].y ) * epsilon < smallest) {
+		if (directions[i] && getDist(getDirectionX(i,s), getDirectionY(i,s),sprites[ac].x , sprites[ac].y ) < smallest) {
 			smallest = getDist(getDirectionX(i,s),getDirectionY(i,s),sprites[ac].x , sprites[ac].y );
 			r = i;
 		}
@@ -1194,7 +1294,7 @@ int getDirectionToApple(int s) {
 	int r = 0;
 	int smallest = INT_MAX;
 	for (int i = 0; i < 4; i++) {
-		if (directions[i] && getDist(getDirectionX(i,s), getDirectionY(i,s),apple.x,apple.y) * epsilon < smallest) {
+		if (directions[i] && getDist(getDirectionX(i,s), getDirectionY(i,s),apple.x,apple.y) < smallest) {
 			smallest = getDist(getDirectionX(i,s),getDirectionY(i,s),apple.x,apple.y);
 			r = i;
 		}
@@ -1527,16 +1627,18 @@ void getFarthestCurrent(int s) {
 	int ac = getBot(s);
 	Path *c = closedSet[s];
 	int pdis = 0;
+	int pdanger = INT_MAX;
 	int myx = sprites[ac].x;
 	int myy = sprites[ac].y;
 	while (c != NULL) {
-		if (getDist(myx,myy,c->x,c->y) > pdis) {
+		if (getDist(myx,myy,c->x,c->y) > pdis || dangerousNeighbors(c->x,c->y,s) < pdanger) {
 			bool flag = true;
 			if (getColor(c->x,c->y)) { c = c->next; continue; }
 			for (int i = 4; i < 8; i++) {
 				if (getColor(getDirectionXTo(i,c->x,s),getDirectionYTo(i,c->y,s))) flag = false;
 			}
 			if (!flag) { c = c->next; continue; }
+			pdanger = dangerousNeighbors(c->x,c->y,s);
 			current[s].x = c->x;
 			current[s].y = c->y;
 			pdis = getDist(myx,myy,c->x,c->y);
@@ -1654,17 +1756,27 @@ void showPathToApple(int s) {
 	giveUpTimer[s] = (u64)0;
 	plotting[s] = false;
 	int ac = getBot(s);
+	if (getDist(sprites[ac].x,sprites[ac].y,apple.x,apple.y) > 400) { //its far away, we should speed up maybe?
+		if (rand() % 100 < bots[s].can_go_fast * 2 && !options[3]) sprites[ac].speed = BIKE_FAST; //twice as likely to go fast because it's far away
+		else sprites[ac].speed = BIKE_NORMAL;
+	} else { //its close by. mostly depends on how aggressive I am.
+		if (rand() % 100 < bots[s].can_go_fast && !options[3]) sprites[ac].speed = BIKE_FAST; //mostly depends on how aggressive I am
+		else sprites[ac].speed = BIKE_NORMAL;
+	}
+	bots[s].fudge_factor = 0;
+	bots[s].fudge_x = 0;
+	bots[s].fudge_y = 0;
 	if (ac >= numPlayers()) {
 		plotting[s] = false;
 		totalPathN[s] = 0;
 		return;
 	}
-	sprites[ac].speed = BIKE_NORMAL;
 	int tempx;
 	int tempy;
 	plotting[s] = false;
 	totalPathN[s] = 0;
-	while ((cameFrom[s][current[s].x][current[s].y].x || cameFrom[s][current[s].x][current[s].y].y) && totalPathN[s] < 240 * 400) {
+	u64 timeUp = svcGetSystemTick();
+	while ((cameFrom[s][current[s].x][current[s].y].x || cameFrom[s][current[s].x][current[s].y].y) && totalPathN[s] < 240 * 400 && svcGetSystemTick() - timeUp < TICKS_PER_MS) {
 		tempx = cameFrom[s][current[s].x][current[s].y].x;
 		tempy = cameFrom[s][current[s].x][current[s].y].y;
 		totalPath[s][totalPathN[s]].x = current[s].x;
@@ -1715,9 +1827,9 @@ int getAlive() {
 	}
 	if (k >= actual_bikes - 1) return -1;*/
 	if (everyoneElseIsDead(myNum)) return myNum;
-	int r = (rand() % actual_bikes);
+	int r = (rand() % numPlayers());
 	//while (sprites[r].dead) r = rand() % actual_bikes;
-	if (r >= actual_bikes) return myNum;
+	if (r >= numPlayers()) return myNum;
 	return r;
 }
 void fixCameFroms(int i) {
@@ -1825,17 +1937,13 @@ void relocateApple() {
 	while (getColor(apple.x , apple.y ) || getColor((apple.x ) + 1, (apple.y ) + 1)) {
 		apple.x = ((rand() % (400 - 64)) + 30);
 		apple.y = ((rand() % (240 - 64)) + 30);
-		while ((apple.x ) % 2 || (apple.y ) % 2) {
-			apple.x = ((rand() % (400 - 64)) + 30);
-			apple.y = ((rand() % (240 - 64)) + 30);
-		}
 	}
 	//int n = getAlive();
 	/*if (n >= 0) if (!pathfindToApple(n)) {
 		getMoveableRangeApple(n);
 	}*/
 	for (int b = 0; b < numBots; b++) {
-		fixCameFroms(getBot(b));
+		if (sprites[getBot(b)].dead || b > numOpponents + 1) continue;
 		int ax = apple.x;
 		int ay = apple.y;
 		if (cameFrom[b][ax][ay].x && cameFrom[b][ax][ay].y) {
@@ -2010,7 +2118,7 @@ static void updateApple(int x, int y) {
 	}
 }
 void useSpecialIfICan(int s) {
-	if (!usedSpecial[s]) {
+	if (!usedSpecial[s] && !options[5] && !options[7]) {
 		usedSpecial[s] = true;
 		movingApple = true;
 	}
@@ -2019,13 +2127,12 @@ void useSpecialOrGiveUp(int s) {
 	/*snprintf(mystring,sizeof(mystring),"time left: %" PRIu64 "(%d)",(svcGetSystemTick() - giveUpTimer[s]),(giveUpTimer[s] == (u64)0));
 	myprintf(mystring);*/
 	if (!usedSpecial[s]) {
-		usedSpecial[s] = true;
-		movingApple = true;
+		useSpecialIfICan(s);
 	} else {
 		/*snprintf(mystring,sizeof(mystring),"giveuptimer: %llu < %llu",svcGetSystemTick() - giveUpTimer[s],(u64)(TICKS_PER_SEC * 30));
 		myprintf(mystring);*/
 		if (giveUpTimer[s] == (u64)0) {
-			timeTilDeath[s] = (u64)BIKE_SLOW * TICKS_PER_MS * (closedSetN[s] / 3);
+			timeTilDeath[s] = (u64)BIKE_SLOW * TICKS_PER_MS * (closedSetN[s] / (100 / bots[s].patience));
 			giveUpTimer[s] = svcGetSystemTick();
 		} else if ((svcGetSystemTick() - giveUpTimer[s]) > timeTilDeath[s]) {
 			sprites[s].dead = true;
@@ -2033,12 +2140,12 @@ void useSpecialOrGiveUp(int s) {
 	}
 }
 
-void showPlotMovement(int s) {
-	keepConsole();
+void showPlotMovement(int s, bool refresh) {
+	if (refresh && patchConsole) keepConsole();
 	if (sprites[getBot(s)].dead) return;
 	if (openSetN[s] == 0) {
 		useSpecialOrGiveUp(s);
-	} else if (closedSetN[s] > 12000) {
+	} else if (closedSetN[s] > 12000 * (float)((float)bots[s].patience / 100.0f)) {
 		useSpecialIfICan(s);
 	}
 	plotting[s] = true;
@@ -2050,7 +2157,7 @@ void showPlotMovement(int s) {
 	int tempy;
 	totalPathN[s] = 0;
 	u64 timeUp = svcGetSystemTick();
-	while ((cameFrom[s][current[s].x][current[s].y].x || cameFrom[s][current[s].x][current[s].y].y) && totalPathN[s] < 240 * 400 && svcGetSystemTick() - timeUp < TICKS_PER_SEC) {
+	while ((cameFrom[s][current[s].x][current[s].y].x || cameFrom[s][current[s].x][current[s].y].y) && totalPathN[s] < 240 * 400 && svcGetSystemTick() - timeUp < TICKS_PER_MS) {
 		tempx = cameFrom[s][current[s].x][current[s].y].x;
 		tempy = cameFrom[s][current[s].x][current[s].y].y;
 		if (getNextColor(tempx,tempy) && tempx != sprites[ac].x  && tempy != sprites[ac].y )  {
@@ -2075,7 +2182,7 @@ void showPlotMovement(int s) {
 			C3D_FrameEnd(0);
 		}*/
 		totalPathN[s]++;
-		if (tempx == sprites[ac].x  && tempy == sprites[ac].y ) break;
+		if (tempx == sprites[ac].x  && tempy == sprites[ac].y) break;
 		current[s].x = tempx;
 		current[s].y = tempy;
 	}
@@ -2113,11 +2220,27 @@ int livingBots() {
 	if (r <= 0) return 1;
 	return r;
 }
+
+//Return a multiplier for difficulty level for this bot going to this node.
+//This multiplier will be multiplied by the cost to reach this node in the A* search algorithm.
+//This is to create "hills and valleys" of difficulty levels, making valleys be "easy" to get to and walls be "hills" that should
+//mostly be avoided.
+
+int dangerousNeighbors(int x, int y, int s) {
+	int fudge = 4; 
+	if (bots[s].precision >= 100) fudge = 1;
+	else if (bots[s].precision >= 90) fudge = 2;
+	else if (bots[s].precision >= 80) fudge = 3;
+	int danger = 0;
+	for (int i = 0; i < 4; i++) {
+		for (int f = 0; f < fudge; f++) {
+			u32 c = getColor(getDirectionXFor(i,x,s,f),getDirectionYFor(i,y,s,f));
+			if (c && c != colors[8]) { danger += fudge - f; break; }
+		}
+	}
+	return danger;
+}
 void continuePlotting(int s) {
-	//snprintf(mystring,sizeof(mystring),"ms before next movement: %" PRIu64,(u64)(firstTimeDiff() / TICKS_PER_MS));
-	//myprintf(mystring);
-	//snprintf(mystring,sizeof(mystring),"!.ycontinuePlotting(%d)",s);
-	//myprintf(mystring);
 	int ac = getBot(s);
 	if (sprites[ac].dead) return;
 	u64 startThinking = svcGetSystemTick();
@@ -2135,17 +2258,17 @@ void continuePlotting(int s) {
 		i++;
 		if (svcGetSystemTick() - startThinking > thinkingTime) {
 			if (!options[4]) sprites[ac].speed = BIKE_SLOW;
-			showPlotMovement(s);
+			showPlotMovement(s,true);
 			return;
 		}
 		if (closedSetN[s] >= 240 * 400) {
 			if (!options[4]) sprites[ac].speed = BIKE_SLOW; 
-			showPlotMovement(s);
+			showPlotMovement(s,true);
 			return;
 		}
 		if (openSetN[s] >= 240 * 400) {
 			if (!options[4]) sprites[ac].speed = BIKE_SLOW;
-			showPlotMovement(s);
+			showPlotMovement(s,true);
 			return;
 		}
 		setCurrentF(s);
@@ -2158,7 +2281,7 @@ void continuePlotting(int s) {
 		u32 kDown = hidKeysDown();
 		if (kDown & KEY_START) { 
 			sprites[s].speed = 90;
-			showPlotMovement(s);
+			showPlotMovement(s,true);
 			return;
 		}
 		if (kDown & KEY_L) {
@@ -2202,12 +2325,15 @@ void continuePlotting(int s) {
 		}
 	}
 	if (!options[4]) sprites[ac].speed = BIKE_SLOW;
-	showPlotMovement(s);
+	showPlotMovement(s,true);
 	return;
 }
 void plotCourse(int s) {
 	//snprintf(mystring,sizeof(mystring),"!.rplotCourse(%d)",s);
 	//myprintf(mystring);
+	bots[s].fudge_x = 0;
+	bots[s].fudge_y = 0;
+	bots[s].fudge_factor = 0;
 	int ac = getBot(s);
 	if (sprites[ac].dead) return;
 	plotting[s] = false;
@@ -2222,7 +2348,7 @@ void plotCourse(int s) {
 	addOpenSet(x,y,s);
 	gscore[s][x][y] = 0;
 	fscore[s][x][y] = getDist(x,y,apple.x ,apple.y );
-	if (s >= numPlayers()) { showPlotMovement(s); return; }
+	if (s >= numPlayers()) { showPlotMovement(s,true); return; }
 	//if (getDist(x,y,apple.x ,apple.y ) * epsilon < 4) { plotMovement(s); return; }
 	//myprintf("!.yplotCourse()");
 	int i = 0;
@@ -2236,17 +2362,17 @@ void plotCourse(int s) {
 		i++;
 		if (svcGetSystemTick() - startThinking > thinkingTime) {
 			if (!options[4]) sprites[ac].speed = BIKE_SLOW;
-			showPlotMovement(s);
+			showPlotMovement(s,true);
 			return;
 		}
 		if (closedSetN[s] >= 200 * 240) { 
 			if (!options[4]) sprites[ac].speed = BIKE_SLOW;
-			showPlotMovement(s);
+			showPlotMovement(s,true);
 			return;
 		}
 		if (openSetN[s] >= 200 * 240) {
 			if (!options[4]) sprites[ac].speed = BIKE_SLOW;
-			showPlotMovement(s);
+			showPlotMovement(s,true);
 			return;
 		}
 		setCurrentF(s);
@@ -2258,7 +2384,7 @@ void plotCourse(int s) {
 		/*hidScanInput();
 		if (hidKeysDown() & KEY_START) { 
 			sprites[s].speed = 90;
-			showPlotMovement(s);
+			showPlotMovement(s,true);
 			return;
 		}*/
 		remOpenSet(current[s].x,current[s].y,s);
@@ -2299,16 +2425,18 @@ void plotCourse(int s) {
 		if (openSetN[s] == 0) break;
 	}
 	if (!options[4]) sprites[ac].speed = BIKE_SLOW;
-	showPlotMovement(s);
+	showPlotMovement(s,true);
 	return;
 }
 bool checkPath(int s) {
+	int totalDanger = 0;
 	int max = totalPathN[s] - 5;
 	if (max < 0) max = 0;
+	int ac = getBot(s);
 	for (int i = totalPathN[s] - 1; i > max; i--) {
 		if (!totalPath[s][i].x && !totalPath[s][i].y) continue;
-		if (abs(totalPath[s][i].x - (sprites[getBot(s)].x )) < 2 && abs(totalPath[s][i].y - (sprites[getBot(s)].y )) < 2) { myprintf("skipped."); continue; }
-		u32 check = getColor(totalPath[s][i].x,totalPath[s][i].y);
+		if (abs(totalPath[s][i].x - sprites[ac].x + bots[s].fudge_x) < 2 && abs(totalPath[s][i].y - sprites[ac].y + bots[s].fudge_y) < 2) { continue; }
+		u32 check = getColor(totalPath[s][i].x + bots[s].fudge_x,totalPath[s][i].y + bots[s].fudge_y);
 		if (check != colors[8] && check != 0) {
 			//setTextColor(0xff0000ff);
 			//snprintf(mystring,sizeof(mystring),"!.ryep (%d) (%d %d)%" PRIu64 "!.w",i,sprites[getBot(s)].dx ,sprites[getBot(s)].dy ,(u64)svcGetSystemTick());
@@ -2319,9 +2447,26 @@ bool checkPath(int s) {
 			plotting[s] = false;
 			totalPathN[s] = 0;*/
 			plotCourse(s);
+			if (!options[4]) sprites[getBot(s)].speed = BIKE_SLOW;
+			else sprites[getBot(s)].speed = BIKE_NORMAL;
+			bots[s].last_speed_change = svcGetSystemTick();
 			return true;
 		}
+		totalDanger += dangerousNeighbors(totalPath[s][i].x,totalPath[s][i].y,s);
 	}
+	if (totalDanger < 2 && sprites[ac].speed == BIKE_NORMAL) {
+		int a = getAlive();
+		if ((getDist(sprites[a].x,sprites[a].y,apple.x,apple.y) < getDist(sprites[ac].x,sprites[ac].y,apple.x,apple.y) || svcGetSystemTick() - bots[s].last_speed_change > TICKS_PER_MS * 15) && rand() % 100 < bots[s].can_go_fast && (getHighestScore() != ac || bots[s].can_go_fast >= 100)) {
+			if (!options[3]) sprites[getBot(s)].speed = BIKE_FAST;
+			bots[s].last_speed_change = svcGetSystemTick();
+		} else if (getDist(sprites[ac].x,sprites[ac].y,apple.x,apple.y) > 400) { //its far away, we should speed up maybe?
+				if (rand() % 100 < bots[s].can_go_fast * 2 && !options[3]) sprites[ac].speed = BIKE_FAST; //twice as likely to go fast because it's far away
+				else sprites[ac].speed = BIKE_NORMAL;
+		} 
+	} else if (totalDanger > 12 && sprites[ac].speed == BIKE_FAST) {
+		sprites[ac].speed = BIKE_NORMAL;
+	}
+	else if (sprites[ac].speed == BIKE_SLOW && svcGetSystemTick() - bots[s].last_speed_change > TICKS_PER_SEC) sprites[ac].speed = BIKE_NORMAL;
 	return false;
 }
 static void setApple(int player, int x, int y) {
@@ -2532,16 +2677,17 @@ static void setSprites() {
 		if (i > currentBots) memset(sprites[i].username,0,sizeof(sprites[i].username));
 		else if (i != 0) { 
 			if (i < numBots) plotting[i] = false;
-			snprintf(sprites[i].username,sizeof(sprites[i].username),"Saad");
+			snprintf(sprites[i].username,sizeof(sprites[i].username),"Bot %c",('A' + i - 1));
 		}
-		path[0][i].x = sprites[i].x;
-		path[0][i].y = sprites[i].y;
 
 		if (!options[1]) sprites[i].length = 40;
 		else sprites[i].length = 120 * 200 - 1;
 		growth[i] = 0;
 		currentPath[i] = 120 * 200 - 20;
 		pathPos[i] = 120 * 200 - 21;
+
+		path[pathPos[i]][i].x = sprites[i].x;
+		path[pathPos[i]][i].y = sprites[i].y;
 
 		if(rand() & 1)
 			sprites[i].dx = -sprites[i].dx;
@@ -2579,10 +2725,27 @@ static void sceneInit(void) {
 	for (int i = 0; i < 30; i++) {
 		memset(consoleBuffer[i],0,sizeof(consoleBuffer[i]));
 	}
-	for (int i = 0; i < numBots; i++) {
-		bots[i].can_go_fast = false;
-		bots[i].precision = 80;
+	for (int i = 0; i < 11; i++) {
+		options[i] = 0;
+		erased[i] = 0;
+	}
+	bots[0].can_go_fast = 0; //autopilot
+	bots[0].precision = 100;
+	bots[0].patience = 30;
+	bots[0].fudge_x = 0;
+	bots[0].fudge_y = 0;
+	bots[0].fudge_factor = 0;
+	bots[0].difficulty = 0;
+	bots[0].last_speed_change = 0;
+	for (int i = 1; i < numBots; i++) {
+		bots[i].can_go_fast = 30;
+		bots[i].precision = 60;
 		bots[i].patience = 30;
+		bots[i].fudge_x = 0;
+		bots[i].fudge_y = 0;
+		bots[i].fudge_factor = 0;
+		bots[i].last_speed_change = 0;
+		bots[i].difficulty = 1;
 	}
 	memset(path,0,sizeof(path[0][0]) * 200 * 120 * NUM_SPRITES);
 	// Load the vertex shader, create a shader program and bind it
@@ -2736,28 +2899,32 @@ static void reversePath(int n) {
         path[end][n] = temp;
         start++;
         end--;
-        if (start >= 120 * 200) start = 0;
+        if (start >= 120 * 200 - 1) start = 0;
         if (end < 0) end = 120 * 200 - 1;
     }
 
     /*int tempPath = currentPath[n];
     currentPath[n] = pathPos[n];
     pathPos[n] = tempPath;*/
+    while (path[currentPath[n]][n].x == 0 && path[currentPath[n]][n].y == 0) {
+    	currentPath[n]--;
+    	if (currentPath[n] < 0) currentPath[n] = 240 * 400 - 1;
+    }
     int tempPath = currentPath[n];
     sprites[n].x = path[tempPath][n].x;
     sprites[n].y = path[tempPath][n].y;
-    int speed = abs(sprites[n].dx);
-    if (sprites[n].dy) speed = abs(sprites[n].dy);
     tempPath--;
-    if (tempPath < 0) tempPath = 240*400 - 1;
-    sprites[n].dx = 0;
-    sprites[n].dy = 0;
+    if (tempPath < 0) tempPath = 120 * 200 - 1;
+    sprites[n].dx *= -1;
+    sprites[n].dy *= -1;
     if (path[tempPath][n].x == path[currentPath[n]][n].x) {
-    	if (path[tempPath][n].y > path[currentPath[n]][n].y) sprites[n].dy = speed * -1;
-    	else sprites[n].dy = speed;
-    } else {
-    	if (path[tempPath][n].x > path[currentPath[n]][n].x) sprites[n].dx = speed * -1;
-    	else sprites[n].dx = speed;
+    	sprites[n].dx = 0;
+    	if (path[tempPath][n].y > path[currentPath[n]][n].y) sprites[n].dy = bikeSpeed * -1;
+    	else sprites[n].dy = bikeSpeed;
+    } else if (path[tempPath][n].y == path[currentPath[n]][n].y) {
+    	sprites[n].dy = 0;
+    	if (path[tempPath][n].x > path[currentPath[n]][n].x) sprites[n].dx =  bikeSpeed * -1;
+    	else sprites[n].dx = bikeSpeed;
     }
 }
 static void printScore() {
@@ -2765,7 +2932,8 @@ static void printScore() {
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[0;0HScore: ");
 		char scores[12];
 		for (int i = 0; i < numPlayers(); i++) {
-			snprintf(scores,sizeof(scores),"%s%d", textColors[i],score[i]);
+			if (sprites[i].dead) snprintf(scores,sizeof(scores),"%s%d", GREY,score[i]);
+			else snprintf(scores,sizeof(scores),"%s%d", textColors[i],score[i]);
 			strcat(mystring,scores);
 			if (i < numPlayers() - 1) { snprintf(scores,sizeof(scores)," %s- ",WHITE); strcat(mystring,scores); }
 		}
@@ -2777,10 +2945,11 @@ static void printScore() {
 		for (int i = 0; i < numPlayers(); i++) {
 			if (!sprites[i].dead) {
 				memset(living,0,sizeof(living));
-				snprintf(living,sizeof(living),"%s%s%s",textColors[i],sprites[i].username,WHITE);
+				if (sprites[i].dead) snprintf(living,sizeof(living),"%s%s%s",GREY,sprites[i].username,WHITE);
+				else snprintf(living,sizeof(living),"%s%s%s",textColors[i],sprites[i].username,WHITE);
 				if (strlen(mystring) < 140) {
 					strcat(mystring,living);
-					if (i < actual_bikes - 1) strcat(mystring,", ");
+					if (i < numPlayers() - 1) strcat(mystring,", ");
 				}
 			}
 		}
@@ -2867,20 +3036,21 @@ static void fixLength(int img) {
 	int oldpathn = pathPos[img];
 	int pathn = currentPath[img];
 	int i = 0;
-	while (getLength(img) <= sprites[img].length + 1 - growth[img] && i < 20) {
+	while (getLength(img) <= sprites[img].length + 1 - growth[img] && i < 20 && path[oldpathn][img].x && path[oldpathn][img].y) {
 		i++;
-		overwriteSprite(path[oldpathn][img].x , path[oldpathn][img].y , 2, 2, img);
+		if (path[oldpathn][img].x && path[oldpathn][img].y) overwriteSprite(path[oldpathn][img].x , path[oldpathn][img].y , 2, 2, img);
 		oldpathn--;
 		if (oldpathn < 0) oldpathn = 120 * 200 - 1;
 		pathPos[img] = oldpathn;
 	}
+	if (!path[oldpathn][img].x || !path[oldpathn][img].y) return;
 	currentPath[img] = pathn;
 	pathPos[img] = oldpathn;
 	sprites[img].x = path[currentPath[img]][img].x;
 	sprites[img].y = path[currentPath[img]][img].y;
 }
 static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, int img) {
-	if ((sx ) == (dx ) && (sy ) == (dy )) {
+	if (sx == dx && sy == dy) {
 		overwriteSprite(dx,dy,2,2,getImg(img));
 		return;
 	}
@@ -3120,11 +3290,11 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 				}
 			}
 			else if (prevx == prevx2) {
-				while ((path[pathn][img].y ) != udy && i < 20) { i++; drawSprite(path[pathn][img].x ,path[pathn][img].y ,2,2,9); path[pathn][img].x = 500; path[pathn][img].y = 500; pathn--; if (pathn < 0) pathn = 120 * 200 - 1; }
+				while ((path[pathn][img].y ) != udy && i < 20) { i++; overwriteSprite(path[pathn][img].x ,path[pathn][img].y ,2,2,9); path[pathn][img].x = 500; path[pathn][img].y = 500; pathn--; if (pathn < 0) pathn = 120 * 200 - 1; }
 				x = path[pathn][img].x;
 				y = path[pathn][img].y;
 				i = 0;
-				overwriteSprite(x,y,2,2,img);
+				//overwriteSprite(x,y,2,2,img);
 				while ((path[pathn][img].x ) != udx && i < 20) { i++; x += tx; pathn++; overwriteSprite(x,y,2,2,getAndDecImg(img)); path[pathn][img].x = x; path[pathn][img].y = y; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] >= 120 * 200) currentPath[img] = 0; if (pathn >= 120 * 200) pathn = 0; }
 				//if (pathn == currentPath[img]) currentPath[img]++;
 				if (currentPath[img] >= 120 * 200) currentPath[img] = 0;
@@ -3134,7 +3304,7 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 				x = path[pathn][img].x;
 				y = path[pathn][img].y;
 				i = 0;
-				drawSprite(x,y,2,2,img);
+				//overwriteSprite(x,y,2,2,img);
 				while ((path[pathn][img].y ) != udy && i < 20) { i++; y += ty; overwriteSprite(x,y,2,2,getAndDecImg(img)); pathn++; path[pathn][img].x = x; path[pathn][img].y = y; if (pathn >= currentPath[img]) currentPath[img]++; if (currentPath[img] >= 120 * 200) currentPath[img] = 0; if (pathn >= 120 * 200) pathn = 0; }
 				//if (pathn == currentPath[img]) currentPath[img]++;
 				if (currentPath[img] >= 120 * 200) currentPath[img] = 0;
@@ -3166,7 +3336,7 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 		i = 0;
 		if (udx == x) { 
 			if (abs(udy - y) > 2) {
-				while (path[pathn][img].y  != udy && i < 20) { i++; drawSprite(path[pathn][img].x , path[pathn][img].y , 2, 2, 9); path[pathn][img].x = 500; path[pathn][img].y = 500; pathn--; if (pathn < 0) pathn = 120 * 200 - 1; } 
+				while (path[pathn][img].y != udy && i < 20) { i++; overwriteSprite(path[pathn][img].x , path[pathn][img].y , 2, 2, 9); path[pathn][img].x = 500; path[pathn][img].y = 500; pathn--; if (pathn < 0) pathn = 120 * 200 - 1; } 
 				//drawSprite(path[pathn][img].x , path[pathn][img].y , 2, 2, 9); 
 				i = 0;
 				currentPath[img] = pathn; 
@@ -3187,7 +3357,7 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 		}
 		else if (udy == y) { 
 			if (abs(udx - x) > 2) {
-				while (path[pathn][img].x  != udx && i < 20) { i++; drawSprite(path[pathn][img].x , path[pathn][img].y , 2, 2, 9); path[pathn][img].x = 500; path[pathn][img].y = 500; pathn--; if (pathn < 0) pathn = 120 * 200 - 1; } 
+				while (path[pathn][img].x  != udx && i < 20) { i++; overwriteSprite(path[pathn][img].x , path[pathn][img].y , 2, 2, 9); path[pathn][img].x = 500; path[pathn][img].y = 500; pathn--; if (pathn < 0) pathn = 120 * 200 - 1; } 
 				//drawSprite(path[pathn][img].x , path[pathn][img].y , 2, 2, 9); 
 				currentPath[img] = pathn; 
 				//growth[img] += i; 
@@ -3248,19 +3418,19 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 			sprites[img].y = path[currentPath[img]][img].y; 
 		}
 	}
-	if (x != udx && y != udy && (sprites[img].x + sprites[img].dx != udx || sprites[img].y + sprites[img].dy != udy)) return;
+	//if (x != udx && y != udy && (sprites[img].x + sprites[img].dx != udx || sprites[img].y + sprites[img].dy != udy)) return;
 	i = 0;
 
-	if (w != 0 && h != 0) return;
+	if (w != 0 && h != 0) {
+		return;
+	}
 	//Now fill in shortcomings.
 	int c = rand() % 9;
 	if (udx == prevx && udy == prevy) {
 		if (debugging) {
 			while (c == img) c = rand() % 9;
-			clearString(); snprintf(mystring,sizeof(mystring),"%s%d .. %d%s",textColors[c],udx,udy,WHITE);
-			myprintf(mystring);
-			drawSprite(sx ,sy ,2,2,c);
-			drawSprite(dx, dy, 2, 2, c);
+			overwriteSprite(sx ,sy ,2,2,c);
+			overwriteSprite(dx, dy, 2, 2, c);
 		}
 		sprites[img].x = path[currentPath[img]][img].x;
 		sprites[img].y = path[currentPath[img]][img].y;
@@ -3314,7 +3484,8 @@ static void finishLine(int pathnum,u32 sx, u32 sy, u32 dx, u32 dy, Sprite msg, i
 		currentPath[img] = pathn;
 		return;
 	}
-	while ((x != dx || y != dy) && (i < 4)) {
+	i = 0;
+	while ((x != dx || y != dy) && (i < 8)) {
 		i++;	
 
 		path[currentPath[img]][img].y = (y );
@@ -3453,21 +3624,392 @@ void displayMessage() {
 void displayMessageFinish() {
 	myconsoleClear();
 }
-char gonOrOff[5];
-char gselectedColor[5];
-int gselected = 0;
-int gload = 0;
-int load = 0;
-bool redo = true;
-u64 glastLoad;
-u64 lastLoad;
-static void gameOptions_init() { 
+void options_menu_init() {
 	myconsoleClear();
 	gselected = 0;
 	gload = 0;
 	glastLoad = svcGetSystemTick();
 }
-static void gameOptions() {
+void options_menu_update() {
+	myprintf("\x1b[0;0HOptions Menus:");
+	if (gselected == 0) myprintf("\x1b[2;0H!.yGame Modes");
+		else myprintf("\x1b[2;0H!.wGame Modes");
+	if (gselected == 1) myprintf("\x1b[3;0H!.yBot Opponents");
+		else myprintf("\x1b[3;0H!.wBot Opponents");
+	hidScanInput();
+	u32 kDown = hidKeysDown();
+	if (kDown & KEY_A) {
+		if (gselected == 0) {
+			pushScene(gameOptions_init,gameOptions,NULL,NULL);
+			return;
+		} else {
+			pushScene(difficulty_menu_init,difficulty_menu_update,difficulty_menu_draw,difficulty_menu_finish);
+			return;
+		}
+	}
+	if (kDown & KEY_B || kDown & KEY_SELECT || kDown & KEY_START) {
+		popScene();
+		return;
+	}
+	if (kDown & KEY_DDOWN || kDown & KEY_CPAD_DOWN) {
+		gselected++;
+		if (gselected > 1) gselected = 0;
+	}
+	if (kDown & KEY_DUP || kDown & KEY_CPAD_UP) {
+		gselected--;
+		if (gselected < 0) gselected = 1;
+	}
+}
+void options_menu_draw() {
+	keepConsole();
+}
+void options_menu_finish() {
+	ignoreB = true;
+}
+u32 oldKHeld = 0;
+u64 lastHeld = 0;
+void opponent_options_init() {
+	myconsoleClear();
+	snprintf(gselectedColor,sizeof(gselectedColor)," ");
+	snprintf(botsColor,sizeof(botsColor),"%s",WHITE);
+	specialSelection = -1;
+	gselected = 0;
+	gload = 0;
+	glastLoad = svcGetSystemTick();
+}
+void opponent_options_update() {
+	if (gselected == 0) {
+		snprintf(gselectedColor,sizeof(gselectedColor),"%s",YELLOW);
+	}
+	else {
+		snprintf(gselectedColor,sizeof(gselectedColor),"%s",WHITE);
+	}
+	if (specialSelection == 0) { snprintf(botsColor,sizeof(botsColor),"%s",RED); }
+	else { snprintf(botsColor,sizeof(botsColor),"%s",WHITE); }
+	snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sNumber of Bots: %s%d",gselectedColor,botsColor,numOpponents);
+	myprintf(mystring);
+	for (int i = 0; i < numOpponents; i++) {
+		//Bot #
+		if (gselected == i * 4 + 1) snprintf(gselectedColor,sizeof(gselectedColor),"%s",YELLOW);
+		else snprintf(gselectedColor,sizeof(gselectedColor),"%s",WHITE);
+		snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%sBot %c",i * 4 + 1,textColors[i + 1],('A' + i));
+		myprintf(mystring);
+
+		//	Allow A:
+		if (gselected == i * 4 + 2) snprintf(gselectedColor,sizeof(gselectedColor),"%s",YELLOW);
+		else snprintf(gselectedColor,sizeof(gselectedColor),"%s",WHITE);
+		if (specialSelection == i * 4 + 2) snprintf(botsColor,sizeof(botsColor),"%s",RED);
+		else snprintf(botsColor,sizeof(botsColor),"%s",WHITE);
+		snprintf(mystring,sizeof(mystring),"\x1b[%d;0H   %s%s%sAggressiveness: %s%d%%",i * 4 + 2,BLACK,loading[gload],gselectedColor, botsColor, bots[i + 1].can_go_fast);
+		myprintf(mystring);
+
+		//  Precision: 80%
+		if (gselected == i * 4 + 3) snprintf(gselectedColor,sizeof(gselectedColor),"%s",YELLOW);
+		else snprintf(gselectedColor,sizeof(gselectedColor),"%s",WHITE);
+		if (specialSelection == i * 4 + 3) snprintf(botsColor,sizeof(botsColor),"%s",RED);
+		else snprintf(botsColor,sizeof(botsColor),"%s",WHITE);
+		snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s   %s%s%sPrecision: %s%d%%",i * 4 + 3,gselectedColor,BLACK,loading[gload],gselectedColor,botsColor,bots[i + 1].precision);
+		myprintf(mystring);
+
+		//  Patience: 30
+		if (gselected == i * 4 + 4) snprintf(gselectedColor,sizeof(gselectedColor),"%s",YELLOW);
+		else snprintf(gselectedColor,sizeof(gselectedColor),"%s",WHITE);
+		if (specialSelection == i * 4 + 4) snprintf(botsColor,sizeof(botsColor),"%s",RED);
+		else snprintf(botsColor,sizeof(botsColor),"%s",WHITE);
+		snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s   %s%s%sPatience: %s%d",i * 4 + 4,gselectedColor,BLACK,loading[gload],gselectedColor,botsColor,bots[i + 1].patience);
+		myprintf(mystring);
+	}
+
+	hidScanInput();
+	u32 kDown = hidKeysDown();
+	u32 kHeld = hidKeysHeld();
+	if (kHeld != oldKHeld) {
+		oldKHeld = kHeld;
+		lastHeld = svcGetSystemTick();
+	}
+	if (kDown & KEY_A) {
+		if (specialSelection != gselected) {
+			specialSelection = gselected;
+		} else specialSelection = -1;
+	}
+	if (kDown & KEY_B) {
+		if (specialSelection != -1) {
+			specialSelection = -1;
+		} else {
+			popScene();
+			return;
+		}
+	}
+	if (kDown & KEY_DRIGHT || kDown & KEY_CPAD_RIGHT || ((kHeld & KEY_DRIGHT || kHeld & KEY_CPAD_RIGHT) && (svcGetSystemTick() - lastHeld > TICKS_PER_SEC / 2))) {
+		if (gselected == 0) {
+			numOpponents++;
+			if (numOpponents >= numBots) numOpponents = 0;
+			myconsoleClear();
+		}
+		if ((gselected - 2) % 4 == 0) {
+			int s = (gselected - 2) / 4 + 1;
+			if (bots[s].can_go_fast <= 98) bots[s].can_go_fast += 2;
+		} 
+		else if ((gselected - 3) % 4 == 0) {
+			int s = (gselected - 3) / 4 + 1;
+			if (bots[s].precision <= 98) bots[s].precision += 2;
+		}
+		else if ((gselected - 4) % 4 == 0) {
+			int s = (gselected - 4) / 4 + 1;
+			if (bots[s].patience <= 98) bots[s].patience += 2;
+		} 
+	}
+	if (kDown & KEY_DLEFT || kDown & KEY_CPAD_LEFT || ((kHeld & KEY_DLEFT || kHeld & KEY_CPAD_LEFT) && (svcGetSystemTick() - lastHeld > TICKS_PER_SEC / 2))) {
+		if (gselected == 0) {
+			numOpponents--;
+			if (numOpponents < 0) numOpponents = numBots - 1;
+			myconsoleClear();
+		}
+		if ((gselected - 2) % 4 == 0) {
+			int s = (gselected - 2) / 4 + 1;
+			if (bots[s].can_go_fast >= 2) bots[s].can_go_fast -= 2;
+		}
+		else if ((gselected - 3) % 4 == 0) {
+			int s = (gselected - 3) / 4 + 1;
+			if (bots[s].precision >= 22) bots[s].precision -= 2;
+		}
+		else if ((gselected - 4) % 4 == 0) {
+			int s = (gselected - 4) / 4 + 1;
+			if (bots[s].patience >= 2) bots[s].patience -= 2;
+		}
+	}
+	if (kDown & KEY_DUP || kDown & KEY_CPAD_UP || ((kHeld & KEY_DUP || kHeld & KEY_CPAD_UP) && (svcGetSystemTick() - lastHeld > TICKS_PER_SEC / 2))) {
+		if (specialSelection == 0) {
+			numOpponents++;
+			if (numOpponents >= numBots) numOpponents = 0;
+			myconsoleClear();
+		}
+		if (specialSelection != -1) {
+			if ((gselected - 3) % 4 == 0) {
+				int s = (gselected - 3) / 4 + 1;
+				if (bots[s].precision <= 98) bots[s].precision += 2;
+			}
+			else if ((gselected - 4) % 4 == 0) {
+				int s = (gselected - 4) / 4 + 1;
+				if (bots[s].patience <= 98) bots[s].patience += 2;
+			} 
+		} else {
+			gselected--;
+			if ((gselected - 1) % 4 == 0) gselected--;
+			if (gselected < 0) gselected = numOpponents * 4;
+		}
+	}
+	if (kDown & KEY_DDOWN || kDown & KEY_CPAD_DOWN || ((kHeld & KEY_DDOWN || kHeld & KEY_CPAD_DOWN) && (svcGetSystemTick() - lastHeld > TICKS_PER_SEC / 2))) {
+		if (specialSelection == 0) {
+			numOpponents--;
+			if (numOpponents < 0) numOpponents = numBots - 1;
+			myconsoleClear();
+		}
+		if (specialSelection != -1) {
+			if ((gselected - 3) % 4 == 0) {
+				int s = (gselected - 3) / 4 + 1;
+				if (bots[s].precision >= 22) bots[s].precision -= 2;
+			}
+			else if ((gselected - 4) % 4 == 0) {
+				int s = (gselected - 4) / 4 + 1;
+				if (bots[s].patience >= 2) bots[s].patience -= 2;
+			} 
+		} else {
+			gselected++;
+			if ((gselected - 1) % 4 == 0) gselected++;	
+			if (gselected > numOpponents * 4) gselected = 0;
+		}
+	}
+	if (kDown & KEY_START || kDown & KEY_SELECT) {
+		popScene();
+		return;
+	}
+}
+void opponent_options_draw() {
+	if (svcGetSystemTick() - glastLoad > TICKS_PER_MS * 30) { gload++; glastLoad = svcGetSystemTick(); }
+	if (gload > 7) gload = 0;
+	keepConsole();
+}
+void difficulty_menu_finish() {
+	for (int i = 0; i < numOpponents; i++) {
+		int s = i + 1;
+		if (bots[s].difficulty == 0) {
+			bots[s].precision = 50;
+			bots[s].patience = 30;
+			bots[s].can_go_fast = 30;
+		} else if (bots[s].difficulty == 1) {
+			bots[s].precision = 80;
+			bots[s].patience = 30;
+			bots[s].can_go_fast = 70;
+		} else if (bots[s].difficulty == 2) {
+			bots[s].precision = 90;
+			bots[s].patience = 50;
+			bots[s].can_go_fast = 90;
+		} else if (bots[s].difficulty == 3) {
+			bots[s].precision = 100;
+			bots[s].patience = 100;
+			bots[s].can_go_fast = 100;
+		}
+	}
+	currentBots = numOpponents + 1;
+}
+void difficulty_menu_init() {
+	myconsoleClear();
+	snprintf(gselectedColor,sizeof(gselectedColor)," ");
+	snprintf(botsColor,sizeof(botsColor),"%s",WHITE);
+	specialSelection = -1;
+	gselected = 0;
+	gload = 0;
+	glastLoad = svcGetSystemTick();
+}
+void difficulty_menu_update() {
+	char leftBracket[2];
+	char rightBracket[2];
+	if (gselected == 0) {
+		snprintf(gselectedColor,sizeof(gselectedColor),"%s",YELLOW);
+	}
+	else {
+		snprintf(gselectedColor,sizeof(gselectedColor),"%s",WHITE);
+	}
+	if (specialSelection == 0) { 
+		snprintf(leftBracket,sizeof(leftBracket),"[");
+		snprintf(rightBracket,sizeof(rightBracket),"]");
+		snprintf(botsColor,sizeof(botsColor),"%s",RED); 
+	}
+	else { 
+		memset(leftBracket,0,sizeof(leftBracket));
+		memset(rightBracket,0,sizeof(rightBracket));
+		snprintf(botsColor,sizeof(botsColor),"%s",WHITE); 
+	}
+	snprintf(mystring,sizeof(mystring),"\x1b[0;0H%sNumber of Bots: %s%d",gselectedColor,botsColor,numOpponents);
+	myprintf(mystring);
+	char easy[10];
+	char medium[10];
+	char hard[10];
+	char insane[10];
+	for (int i = 0; i < numOpponents; i++) {
+		//Bot #
+		if (gselected == i + 1) snprintf(gselectedColor,sizeof(gselectedColor),"%s",YELLOW);
+		else snprintf(gselectedColor,sizeof(gselectedColor),"%s",WHITE);
+		if (specialSelection == i + 1) {
+			snprintf(gselectedColor,sizeof(gselectedColor),"!.r");
+		} 
+		snprintf(easy,sizeof(easy),"!.zEASY");
+		snprintf(medium,sizeof(medium),"!.zMEDIUM");
+		snprintf(hard,sizeof(hard),"!.zHARD");
+		snprintf(insane,sizeof(insane),"!.zINSANE");
+		if (bots[i + 1].difficulty == 0) {
+			snprintf(easy,sizeof(easy),"!.gEASY");
+		} else if (bots[i + 1].difficulty == 1) {
+			snprintf(medium,sizeof(medium),"!.yMEDIUM");
+		} else if (bots[i + 1].difficulty == 2) {
+			snprintf(hard,sizeof(hard),"!.rHARD");
+		} else if (bots[i + 1].difficulty == 3) {
+			snprintf(insane,sizeof(insane),"!.uINSANE");
+		}
+		snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%sBot %s%c: %s %s %s %s",i + 2,gselectedColor,darkColors[i + 1],('A' + i),easy,medium,hard,insane);
+		myprintf(mystring);
+	}
+
+	hidScanInput();
+	u32 kDown = hidKeysDown();
+	u32 kHeld = hidKeysHeld();
+	if ((kHeld & KEY_L && kDown & KEY_R) || (kHeld & KEY_R && kDown & KEY_L)) {
+		popScene(); //hidden menu for modifying individual values of the AI opponents
+		pushScene(opponent_options_init,opponent_options_update,opponent_options_draw,opponent_options_finish);
+	}
+	if (kHeld != oldKHeld) {
+		oldKHeld = kHeld;
+		lastHeld = svcGetSystemTick();
+	}
+	if (kDown & KEY_A) {
+		if (specialSelection != gselected) {
+			specialSelection = gselected;
+		} else specialSelection = -1;
+	}
+	if (kDown & KEY_B) {
+		if (specialSelection != -1) {
+			specialSelection = -1;
+		} else {
+			popScene();
+			return;
+		}
+	}
+	if (kDown & KEY_DRIGHT || kDown & KEY_CPAD_RIGHT || ((kHeld & KEY_DRIGHT || kHeld & KEY_CPAD_RIGHT) && (svcGetSystemTick() - lastHeld > TICKS_PER_SEC / 2))) {
+		if (gselected == 0) {
+			numOpponents++;
+			if (numOpponents >= numBots) numOpponents = 1;
+			myconsoleClear();
+		}
+		else {
+			int s = gselected;
+			bots[s].difficulty++;
+			if (bots[s].difficulty > 3) bots[s].difficulty = 0;
+		} 
+	}
+	if (kDown & KEY_DLEFT || kDown & KEY_CPAD_LEFT || ((kHeld & KEY_DLEFT || kHeld & KEY_CPAD_LEFT) && (svcGetSystemTick() - lastHeld > TICKS_PER_SEC / 2))) {
+		if (gselected == 0) {
+			numOpponents--;
+			if (numOpponents < 1) numOpponents = numBots - 1;
+			myconsoleClear();
+		}
+		else {
+			int s = gselected;
+			bots[s].difficulty--;
+			if (bots[s].difficulty < 0) bots[s].difficulty = 3;
+		}
+	}
+	if (kDown & KEY_DUP || kDown & KEY_CPAD_UP || ((kHeld & KEY_DUP || kHeld & KEY_CPAD_UP) && (svcGetSystemTick() - lastHeld > TICKS_PER_SEC / 2))) {
+		if (specialSelection == 0) {
+			numOpponents++;
+			if (numOpponents >= numBots) numOpponents = 1;
+			myconsoleClear();
+		}
+		if (specialSelection != -1) {
+			int s = specialSelection;
+			bots[s].difficulty++;
+			if (bots[s].difficulty > 3) bots[s].difficulty = 0;
+		} else {
+			gselected--;
+			if (gselected < 0) gselected = numOpponents + 1;
+		}
+	}
+	if (kDown & KEY_DDOWN || kDown & KEY_CPAD_DOWN || ((kHeld & KEY_DDOWN || kHeld & KEY_CPAD_DOWN) && (svcGetSystemTick() - lastHeld > TICKS_PER_SEC / 2))) {
+		if (specialSelection == 0) {
+			numOpponents--;
+			if (numOpponents < 1) numOpponents = numBots - 1;
+			myconsoleClear();
+		}
+		if (specialSelection != -1) {
+			int s = specialSelection;
+			bots[s].difficulty--;
+			if (bots[s].difficulty < 0) bots[s].difficulty = 3;
+		} else {
+			gselected++;
+			if (gselected > numOpponents + 1) gselected = 0;
+		}
+	}
+	if (kDown & KEY_START || kDown & KEY_SELECT) {
+		popScene();
+		return;
+	}
+}
+void difficulty_menu_draw() {
+	if (svcGetSystemTick() - glastLoad > TICKS_PER_MS * 30) { gload++; glastLoad = svcGetSystemTick(); }
+	if (gload > 7) gload = 0;
+	keepConsole();
+}
+void opponent_options_finish() {
+	currentBots = numOpponents + 1;
+}
+void gameOptions_init() { 
+	myconsoleClear();
+	gselected = 0;
+	gload = 0;
+	glastLoad = svcGetSystemTick();
+	snprintf(gselectedColor,sizeof(gselectedColor),"%s",YELLOW);
+}
+void gameOptions() {
 	keepConsole();
 	for (int i = 0; i < numOptions; i++) {
 		if (options[i]) snprintf(gonOrOff,sizeof(gonOrOff),RAINBOW);
@@ -3498,26 +4040,33 @@ static void moveSprites() {
 	for(i = 0; i < numPlayers(); i++) {
 		if (sprites[i].dead || !timeDiff(i)) continue;
 		int times = (int)timeDiff(i);
-		if (times > 50) times = 50;
+		if (times > 50) {
+			times = 50;
+		}
 		for (; times > 0 && !sprites[i].dead; times--) {
 			frameTicks[i] = svcGetSystemTick();
 			int oldxdx = sprites[i].dx;
 			int oldydy = sprites[i].dy;
 			int bc = toBot(i);
 			if ((i > 0 && i != myNum && i < currentBots) || (autoPilot && i == myNum)) {
-				if (totalPathN[bc] < 2 && plotting[bc]) showPlotMovement(bc);
+				if (totalPathN[bc] < 2 && plotting[bc]) {
+					showPlotMovement(bc, false);
+				}
 				if (totalPathN[bc] > 0) {
 					totalPathN[bc]--;
 					while (totalPath[bc][totalPathN[bc]].x == 0 && totalPath[bc][totalPathN[bc]].y == 0 && totalPathN[bc] > 0) {
 						totalPathN[bc]--;
 					}
-					if (totalPathN[bc] == 0) { showPlotMovement(bc); totalPathN[bc]--; } 
-					int myx = totalPath[bc][totalPathN[bc]].x - sprites[i].x;
-					int myy = totalPath[bc][totalPathN[bc]].y - sprites[i].y;
+					if (totalPathN[bc] == 0) {
+						showPlotMovement(bc,false); 
+						totalPathN[bc]--;
+					} 
+					int myx = totalPath[bc][totalPathN[bc]].x - sprites[i].x + bots[bc].fudge_x;
+					int myy = totalPath[bc][totalPathN[bc]].y - sprites[i].y + bots[bc].fudge_y;
 					if (myx == 0 && myy == 0) {
 						totalPathN[bc]--;
-						myx = totalPath[bc][totalPathN[bc]].x - sprites[i].x;
-						myy = totalPath[bc][totalPathN[bc]].y - sprites[i].y;
+						myx = totalPath[bc][totalPathN[bc]].x - sprites[i].x + bots[bc].fudge_x;
+						myy = totalPath[bc][totalPathN[bc]].y - sprites[i].y + bots[bc].fudge_y;
 					}
 					if (myx == 0 || myy == 0) {
 						if (myx == 2) {
@@ -3552,8 +4101,38 @@ static void moveSprites() {
 					sprites[i].dy = oldydy;
 					sprites[i].dx = oldxdx;
 				}*/
+				if (oldxdx != sprites[i].dx || oldydy != sprites[i].dy) {
+					if (sprites[i].speed == BIKE_FAST && (bots[bc].can_go_fast < 91 || getHighestScore() == i)) {
+						bots[bc].last_speed_change = svcGetSystemTick();
+						sprites[i].speed = BIKE_NORMAL;
+					}
+					if (oldxdx == sprites[i].dx * -1 && oldydy == sprites[i].dy * -1) {
+						totalPathN[bc] = 0;
+						plotting[bc] = 0;
+						sprites[i].dx = oldxdx;
+						sprites[i].dy = oldydy;
+					}
+					else if (abs(bots[bc].fudge_x) + abs(bots[bc].fudge_y) <= 4) {
+						float mult = 1.0f;
+						if (sprites[i].speed == BIKE_SLOW) mult += 0.1f;
+						if (bots[bc].fudge_factor > 2 && rand() % 100 > bots[bc].precision * mult) {
+							bots[bc].fudge_x += oldxdx - sprites[i].dx;
+							bots[bc].fudge_y += oldydy - sprites[i].dy;
+							sprites[i].dx = oldxdx;
+							sprites[i].dy = oldydy;
+							/*snprintf(mystring,sizeof(mystring),"woops... (%d %d)",bots[bc].fudge_x,bots[bc].fudge_y);
+							myprintf(mystring);*/
+						} 
+					} else if (bots[bc].fudge_factor > 6) {
+						bots[bc].fudge_x = 0;
+						bots[bc].fudge_y = 0;
+						bots[bc].fudge_factor = 0;
+						showPlotMovement(bc,false);
+					}
+					else bots[bc].fudge_factor += 2;
+				}
 			}
-			if (options[10] && (i == myNum || (i < currentBots && actual_bikes == 1)) && rand() % 80 == 79) {
+			if (options[10] && (i == myNum || (i < currentBots && actual_bikes == 1)) && rand() % 40 < 3) {
 				sprites[i].hole = (rand() % 3) + 1;
 				hole = sprites[i].hole;
 				if (i == myNum) {
@@ -3667,6 +4246,9 @@ static void moveSprites() {
 			}
 			fixCameFroms(i);
 
+			if (bc < currentBots && bc > 0) {
+				bots[bc].fudge_factor++;
+			}
 			sprites[i].x += sprites[i].dx;
 			sprites[i].y += sprites[i].dy;
 			
@@ -3706,15 +4288,17 @@ static void moveSprites() {
 			}*/
 			if (growth[i]) growth[i]--;
 			else if (getLength(i) >= sprites[i].length) { //move tail
-				drawSprite(path[pathPos[i]][i].x , path[pathPos[i]][i].y , 2, 2, 9);
+				overwriteSprite(path[pathPos[i]][i].x , path[pathPos[i]][i].y , 2, 2, 9);
 				pathPos[i]++;
 				if (pathPos[i] >= 200 * 120) pathPos[i] = 0;
 			}
+			overwriteSprite(path[pathPos[i]][i].x, path[pathPos[i]][i].y, 2, 2, 9);
 			currentPath[i]++;
 			if (pathPos[i] >= 200 * 120) pathPos[i] = 0;
 			if (currentPath[i] >= 200 * 120) currentPath[i] = 0;
 			path[currentPath[i]][i].x = sprites[i].x;
 			path[currentPath[i]][i].y = sprites[i].y;
+			overwriteSprite(sprites[i].x,sprites[i].y,2,2,i);
 			if (((i > 0 && i < currentBots) || i == myNum) && !sprites[i].dead) { //check my snake getting apple and collisions
 				u32 color1 = getColor(sprites[i].x , sprites[i].y );
 				u32 color2 = getColor(sprites[i].x + 1, sprites[i].y + 1);
@@ -3745,7 +4329,7 @@ static void moveSprites() {
 						if ((i < currentBots) || (i == myNum && autoPilot)) { plotting[bc] = false; totalPathN[bc] = 0; }
 						if (debugging) myprintf("Got apple.");
 						overwriteSprite(sprites[i].x,sprites[i].y,2,2,i);
-						ignoreDeath = true;
+						//ignoreDeath = true;
 					}
 				}
 				else if (getLength(i) < 10) {} //don't die if game just started
@@ -3966,6 +4550,8 @@ void start_screen_init()
 		networks = NULL;
 		network = NULL;
 	}
+	num_bikes = 1;
+	actual_bikes = 1;
 	ret = 0;
 	memset(overwriteName,0,sizeof(overwriteName));
 	ret=0;
@@ -3983,7 +4569,7 @@ void start_screen_init()
 	//u32 tmp=0;
 
 
-	strncpy((char*)&appdata[4], "Test appdata.", sizeof(appdata)-1);
+
 
 	//myprintf("Successfully initialized.");
 
@@ -3995,15 +4581,16 @@ void start_screen_init()
 	//myprintf(mystring);
 	clearString();
 	myconsoleClear();
+	//snprintf(mystring,sizeof(mystring),"%d",patchConsole);
+	//myprintf(mystring);
 	C3D_RenderTargetSetClear(target, C3D_CLEAR_ALL, CLEAR_COLOR, 0);
 	C3D_RenderTargetSetOutput(target, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
 	gfxFlushBuffers();
 	gfxSwapBuffers();
 	snprintf(mystring,sizeof(mystring),"Version %s",VERSION);
 	myprintf(mystring);
-	myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press + to reset high score."); myprintf("Press SELECT for game modes."); myprintf("Press START to exit."); myprintf(" ");
+	myprintf("\x1b[2;0HHold  to host"); myprintf("Press  to scan for a host."); myprintf("Press  to change name."); myprintf("Press + to reset high score."); myprintf("Press SELECT for options."); myprintf("Press START to exit."); myprintf(" ");
 	importUsername();
-	ignoreB = false;
 }
 void start_screen_draw() {
 	C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
@@ -4023,7 +4610,6 @@ void scan_init() {
 }
 void scan_update() {
 	//gspWaitForVBlank();
-	myprintf("...");
 	hidScanInput();
 
 	total_networks = 0;
@@ -4224,6 +4810,7 @@ void player_crashed_finish() {
 	memset(replyChange,1,sizeof(replyChange[0]) * 10);
 }
 void endRoundGameOptions_Finish() {
+	ignoreB = true;
 	myconsoleClear(); 
 	msg.sprite = sprites[myNum];
 	msg.sprite.speed = 2020;
@@ -4388,8 +4975,6 @@ void setup_init() {
 	setSprites();
 }
 void setup_update() {
-	snprintf(mystring,sizeof(mystring),"%d %d %d %d",hosting,inGame,myNum, num_bikes);
-	myprintf(mystring);
 	keepConsole();
 	if (hosting == 1) { //hosting, wait for connection
 		popScene();
@@ -4397,7 +4982,6 @@ void setup_update() {
 		pushScene(wait_for_player_init,wait_for_player_update,NULL,NULL);
 		return;
 	} else if (!inGame) { //guest connection
-		myprintf("uhhh");
 		popScene();
 		pushScene(receive_bike_init,receive_bike_update,NULL,NULL);
 		return;
@@ -4628,7 +5212,7 @@ void roundEnd_update() {
 		else if (msg.sprite.speed == 1011) { } //ignore
 		else if (msg.sprite.speed == 3030) {
 			if (msg.sprite.image != myNum) {
-				if (!displayedHS) snprintf(mystring,sizeof(mystring),"%s%s%s's new High Score: %s%u",textColors[msg.sprite.image],msg.sprite.username,WHITE,RAINBOW,(unsigned int)msg.sprite.dx); myprintf(mystring);
+				if (!displayedHS) { snprintf(mystring,sizeof(mystring),"%s%s%s's new High Score: %s%u",textColors[msg.sprite.image],msg.sprite.username,WHITE,RAINBOW,(unsigned int)msg.sprite.dx); myprintf(mystring); }
 				displayedHS = true;
 				UDSDirect(msg.sprite.node,msg);
 			} else if (msg.sprite.image == sprites[myNum].image) replyHighscore[msg.sender] = true;
@@ -4642,6 +5226,11 @@ void roundEnd_update() {
 		}
 		else if (msg.sprite.speed == 2020) {
 			if (msg.sender == 0) {
+				saveReady = false;
+				memset(replyChange,1,sizeof(replyChange[0]) * 10);
+				for (int k = 0; k < NUM_SPRITES; k++) {
+					ready[k] = false;
+				}
 				if (lastDeadmsg != msg.timestamp) {
 					lastDeadmsg = msg.timestamp;
 					int n = msg.sprite.dx;
@@ -4759,7 +5348,7 @@ void roundEnd_update() {
 	}
 	if (myNum == 0 && kDown & KEY_SELECT) {
 		if (!ready[0]) { 
-			pushScene(gameOptions_init,gameOptions,NULL,endRoundGameOptions_Finish);
+			pushScene(options_menu_init,options_menu_update,options_menu_draw,endRoundGameOptions_Finish);
 			return;
 		}
 		else myprintf("Can't edit modes when you are ready!");
@@ -4818,7 +5407,7 @@ void roundEnd_update() {
 						for (int i = quit; i < num_bikes - 1; i++) {
 							numLeft++;
 							if (i == myNum) { clearString(); snprintf(mystring,sizeof(mystring),"  You are now %s%s%s!",textColors[myNum],colorNames[myNum],WHITE); }
-							else clearString(); snprintf(mystring,sizeof(mystring),"  %s%s%s is now %s%s%s!", textColors[i + 1], sprites[i+1].username,WHITE, textColors[i],colorNames[i],WHITE);
+							else { clearString(); snprintf(mystring,sizeof(mystring),"  %s%s%s is now %s%s%s!", textColors[i + 1], sprites[i+1].username,WHITE, textColors[i],colorNames[i],WHITE); }
 							myprintf(mystring);
 							sprites[i] = sprites[i+1];
 							sprites[i].image = i;
@@ -5244,19 +5833,19 @@ void game_update() {
 		bool skipPlotting = false;
 		for (int b = 0; b < currentBots; b++) {
 			if (sprites[getBot(b)].dead) continue;
-			if (b != 0 || autoPilot) skipPlotting = checkPath(b);
-			if (!skipPlotting) {
-				if (everyoneElseIsDead(b) && getHighestScore() == b) {
-					sprites[b].dead = true;
-					lastDead = b;
-				}
-				else if (plotting[b]) {
-					if (b != 0) continuePlotting(b);
-					else if (autoPilot) continuePlotting(b);
-				} else {
-					if (totalPathN[b] < 1) {
-						if (b != 0)	plotCourse(b);
-						else if (autoPilot) plotCourse(b);
+			if (b != 0 || autoPilot) {
+				skipPlotting = checkPath(b);
+				if (!skipPlotting) {
+					if (everyoneElseIsDead(b) && !itsATie() && getHighestScore() == b) {
+						sprites[getBot(b)].dead = true;
+						lastDead = b;
+					}
+					else if (plotting[b]) {
+						continuePlotting(b);
+					} else {
+						if (totalPathN[b] < 1) {
+							plotCourse(b);
+						}
 					}
 				}
 			}
@@ -5432,13 +6021,13 @@ void game_update() {
 					//let's clean up any graphical artifacts and fill any holes from teleporting
 					if (sprites[img].forwards == msg.sprite.forwards) if (msg.sprite.image < actual_bikes && msg.sender == msg.sprite.image) {
 						
-						if (abs(currentPath[img] - pathPos[img]) > 40) {
+						if (abs(currentPath[img] - pathPos[img]) >= 10) {
 							
 							if (msg.sprite.dead && !options[9]) {
 								lastDead = msg.sprite.image;
 								eraseOvershoot(msg.sprite);
 							}
-							else finishLine(currentPath[img],sprites[img].x, sprites[img].y, msg.sprite.x, msg.sprite.y, msg.sprite, img);
+							else if (!msg.sprite.dead) finishLine(currentPath[img],sprites[img].x, sprites[img].y, msg.sprite.x, msg.sprite.y, msg.sprite, img);
 						}
 					}
 					//this is definitely a message of movement change
@@ -5514,7 +6103,7 @@ void game_update() {
 			UDSSend(msg);
 		}
 		//its normal
-		else if (getHighestScore() == myNum && allReplied(replyScore)) { lastDead = myNum; sprites[myNum].dead = true; sprites[myNum].node = myNode; msg.sprite = sprites[myNum]; memset(replySprite,0,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); UDSSend(msg); }
+		else if (!itsATie() && getHighestScore() == myNum && allReplied(replyScore)) { lastDead = myNum; sprites[myNum].dead = true; sprites[myNum].node = myNode; msg.sprite = sprites[myNum]; memset(replySprite,0,sizeof(replySprite[0]) * 10); lastSprite = svcGetSystemTick(); UDSSend(msg); }
 	}
 	if (everyoneElseIsDead(myNum) && sprites[myNum].dead) {
 		popScene(); pushScene(roundEnd_init,roundEnd_update,NULL,NULL); return;
@@ -5670,7 +6259,6 @@ void connect_update() {
 			return;
 		}*/
 		con_type = 1;
-		
 	}
 	if (hosting && !network_created)
 	{
@@ -5681,6 +6269,7 @@ void connect_update() {
 			ret = udsCreateNetwork(&networkstruct, passphrase, strlen(passphrase)+1, &bindctx, 1, recv_buffer_size);
 			if(R_FAILED(ret))
 			{
+				failure = (u32)ret;
 				clearString(); snprintf(mystring,sizeof(mystring),"udsCreateNetwork() returned 0x%08x.", (unsigned int)ret);
 				myprintf(mystring);
 				pushScene(failure_message_init,failure_message_update,NULL,failure_message_finish);
@@ -5774,14 +6363,13 @@ void start_screen_update() {
 	hidScanInput();
 	u32 kDown = hidKeysDown();
 	u32 kHeld = hidKeysHeld();
-	u32 kUp = hidKeysUp();
 
 
 
 	//myprintf("Version %sHold A to hostPress B to scan for a host.Press Y to change name.Press X for QRCode to latest release.Press START to exit.",VERSION);
 	// Respond to user input
 	if (kDown & KEY_START) { popScene(); return; }
-	if (kDown & KEY_SELECT) { pushScene(gameOptions_init,gameOptions,NULL,NULL); return; }
+	if (kDown & KEY_SELECT) { pushScene(options_menu_init,options_menu_update,options_menu_draw,options_menu_finish); return; }
 	if (kDown & KEY_L) { debugging = true; myprintf("Debugging turned on."); }
 	if (kDown & KEY_A) { hosting = 1; pushScene(NULL,connect_update,NULL,NULL); return; }
 	if (kHeld & KEY_R && kDown & KEY_X) { cheats = true; myprintf("Move the apple with touchscreen!"); snprintf(overwriteName,sizeof(overwriteName),"Cheater"); }
@@ -5845,12 +6433,12 @@ void start_screen_update() {
 			}
 		} else myprintf("You can't change your name with cheats enabled!");
 	}
-	else if (!ignoreB) if((kDown & KEY_B) || (kHeld & KEY_B)) {
+	else if (!ignoreB) if(kDown & KEY_B) {
 		ignoreB = true;
 		pushScene(scan_init,scan_update,NULL,NULL);
 		return;
 	}
-	if (kUp & KEY_B) ignoreB = false;
+	ignoreB = false;
 }
 void wait_for_player_init() { 
 	hidScanInput();
@@ -5933,6 +6521,9 @@ int main(int argc, char **argv) {
 	C3D_RenderTargetSetClear(target2, C3D_CLEAR_ALL, CLEAR_COLOR, 0);
 	C3D_RenderTargetSetOutput(target2, GFX_BOTTOM, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
 
+	bool check = false;
+	ret = APT_CheckNew3DS(&check);
+	if (!check) patchConsole = true;
 	Result res = fontEnsureMapped();
 
 	if (R_FAILED(res))
@@ -5940,7 +6531,6 @@ int main(int argc, char **argv) {
 	//consoleInit(GFX_BOTTOM, NULL); //Print to bottom screen
 	// Initialize the scene
 	sceneInit();
-
 	sdmcInit();
 	pushScene(start_screen_init,start_screen_update,start_screen_draw,NULL);
 	ret = udsInit(0x3000, NULL);//The sharedmem size only needs to be slightly larger than the total recv_buffer_size for all binds, with page-alignment.
@@ -5990,7 +6580,12 @@ int main(int argc, char **argv) {
 		if (scenes->draw != NULL) scenes->draw();
 		if (CATASTROPHIC_FAILURE) {
 			clearScenes();
-			if (uds_enabled) {
+			if (ret == 0xc8a113ea || ret == 0xd8e007f7) {
+				disconnectNetwork(); 
+				udsExit();
+				udsInit(0x3000, NULL);
+			}
+			else if (uds_enabled) {
 				disconnectNetwork();
 				myNum = 0;
 				currentBots = numOpponents + 1;
