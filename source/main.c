@@ -96,6 +96,9 @@ u8 appdata[0x14] = {0x69, 0x8a, 0x05, 0x5c};
 
 char tmpstr[256];
 
+u8 oldbuffer[4 * 240 * 320];
+u8 mybuffer[4 * 240 * 320];		// keeping track of dirty cells.
+
 u64 stackTrace = 0;
 bool patchConsole = false;
 bool was_in_game = false;
@@ -152,7 +155,7 @@ int epsilon = 1;
 int oldBotSpeed = 90;
 u32 highScore = 0;
 u64 flash = 0;
-bool ignoreDeath = true;
+bool ignoreDeath[NUM_SPRITES];
 char consoleBuffer[30][100];
 u32 colors[10] = { 0x000cff00, 0x00e4ff00, 0x00004eff, 0x00fc00ff, 0x0000fff0, 0x0025722c, 0x00ff9600, 0x00ff7f82, 0x00ffffff, 0x00000000 };
 u64 waitForFinish = 0;
@@ -368,19 +371,23 @@ int numOpponents = 1;
 
 typedef struct path_s {
 	int x, y;
-	struct path_s * next;
 }Path;
+
+typedef struct pathnode_s {
+	int x, y;
+	struct pathnode_s * next;
+}PathNode;
 Path path[200 * 120][NUM_SPRITES];
 
 //autopilot and ai
 u64 giveUpTimer[numBots];
 u64 timeTilDeath[numBots];
-Path *openSet[numBots];
+PathNode *openSet[numBots];
 Path cameFrom[numBots][401][241];
 Path totalPath[numBots][401 * 241];
 int totalPathN[numBots];
 int openSetN[numBots];
-Path *closedSet[numBots];
+PathNode *closedSet[numBots];
 int closedSetN[numBots];
 int gscore[numBots][401][241];
 int fscore[numBots][401][241];
@@ -1019,7 +1026,9 @@ u32 getNextColor(int x, int y) { // Thank you WolfVak for the code!
 		if (abs(x - sprites[i].x) < 2 && abs(y - sprites[i].y) < 2) return colors[i];
 	}
 	u32 offset = ((x * 240) - y + 239) * 3;
-	return (u32) (frameBuf[offset] | frameBuf[offset + 1] << 8 | frameBuf[offset  + 2] << 16);
+	u32 rv = (u32) (frameBuf[offset] | frameBuf[offset + 1] << 8 | frameBuf[offset  + 2] << 16);
+	if (!rv) return (u32) (mybuffer[offset] | mybuffer[offset + 1] << 8 | mybuffer[offset + 2] << 16);
+	return rv;
 }
 u32 getColor(int x, int y) { // Thank you WolfVak for the code!
 	if (x > 400) x = 0;
@@ -1027,7 +1036,9 @@ u32 getColor(int x, int y) { // Thank you WolfVak for the code!
 	if (y > 240) y = 0;
 	else if (y < 0) y = 240;
 	u32 offset = ((x * 240) - y + 239) * 3;
-	return (u32) (frameBuf[offset] | frameBuf[offset + 1] << 8 | frameBuf[offset  + 2] << 16);
+	u32 rv = (u32) (frameBuf[offset] | frameBuf[offset + 1] << 8 | frameBuf[offset  + 2] << 16);
+	if (!rv) return (u32) (mybuffer[offset] | mybuffer[offset + 1] << 8 | mybuffer[offset + 2] << 16);
+	return rv;
 }
 void writeColor(int x, int y, u32 color) {
 	if (x > 400) x = 0;
@@ -1041,18 +1052,11 @@ void writeColor(int x, int y, u32 color) {
 }
 void showMemoryError() {
 	myprintf("Error: ran out of memory...");
-	while (aptMainLoop()) {
-		keepConsole();
-		hidScanInput();
-		if (hidKeysDown() & KEY_START) {
-			pushScene(failure_message_init,failure_message_update,NULL,failure_message_finish);
-			return;
-		}
-	}
+	pushScene(failure_message_init,failure_message_update,NULL,failure_message_finish);
 }
 void addClosedSet(int x, int y, int s) {
-	Path * newNode;
-	newNode = malloc(sizeof(Path));
+	PathNode * newNode;
+	newNode = malloc(sizeof(PathNode));
 	if (newNode == NULL) {
 		showMemoryError();
 		return;
@@ -1066,8 +1070,8 @@ void addClosedSet(int x, int y, int s) {
 }
 void clearClosedSet(int s) {
 	if (closedSetN[s] == 0) return;
-    Path * c;
-    Path * temp;
+    PathNode * c;
+    PathNode * temp;
     c = closedSet[s];
     if (c == NULL) return;
     while (c->next != NULL) {
@@ -1082,16 +1086,16 @@ void clearClosedSet(int s) {
 }
 void remClosedSet(int x, int y, int s) {
 	if (closedSetN[s] <= 0) return;
-    Path * c;
-    Path * prev = NULL;
+    PathNode * c;
+    PathNode * prev = NULL;
     c = closedSet[s];
     if (c == NULL) return;
     if (c->x == x && c->y == y) {
-    	Path * temp;
+    	PathNode * temp;
         temp = c->next;
         free(c);
         closedSet[s] = temp;
-        closedSetN[s]--;
+        if (closedSetN[s] > 0) closedSetN[s]--;
         return;
     }
     while (c->next != NULL) {
@@ -1104,10 +1108,20 @@ void remClosedSet(int x, int y, int s) {
     prev->next = c->next;
     free(c);
     c = NULL;
-    closedSetN[s]--;
+    if (closedSetN[s] > 0) closedSetN[s]--;
 }
 bool openSetNotEmpty(int s) {
 	return openSetN[s] != 0;
+}
+int onScreenX(int x) {
+	if (x > 400) return 0;
+	if (x < 0) return 400;
+	else return x;
+}
+int onScreenY(int y) {
+	if (y > 240) return 0;
+	if (y < 0) return 240;
+	return y;
 }
 int sanitizeX(int x) {
 	if (x < 2) return 396;
@@ -1126,7 +1140,7 @@ int sanitizeY(int y) {
 	return y;*/
 }
 bool inClosedSet(int x, int y, int s) {
-	Path * c = closedSet[s];
+	PathNode * c = closedSet[s];
     while (c != NULL) {
     	if (c->x == x && c->y == y) return true;
 		c = c->next;
@@ -1134,7 +1148,7 @@ bool inClosedSet(int x, int y, int s) {
 	return false;
 }
 bool inOpenSet(int x, int y, int s) {
-	Path * c = openSet[s];
+	PathNode * c = openSet[s];
     while (c != NULL) {
     	if (c->x == x && c->y == y) return true;
 		c = c->next;
@@ -1142,8 +1156,8 @@ bool inOpenSet(int x, int y, int s) {
 	return false;
 }
 void addOpenSet(int x, int y, int s) {
-	Path * newNode;
-	newNode = malloc(sizeof(Path));
+	PathNode * newNode;
+	newNode = malloc(sizeof(PathNode));
 	if (newNode == NULL) {
 		showMemoryError();
 		return;
@@ -1157,8 +1171,8 @@ void addOpenSet(int x, int y, int s) {
 }
 void clearOpenSet(int s) {
 	if (openSetN[s] == 0) return;
-    Path * c;
-    Path * temp;
+    PathNode * c;
+    PathNode * temp;
     c = openSet[s];
     if (c == NULL) return;
     while (c->next != NULL) {
@@ -1173,16 +1187,17 @@ void clearOpenSet(int s) {
 }
 void remOpenSet(int x, int y, int s) {
 	if (openSetN[s] <= 0) return;
-    Path * c;
-    Path * prev = NULL;
+    PathNode * c;
+    PathNode * prev = NULL;
     c = openSet[s];
     if (c == NULL) return;
     if (c->x == x && c->y == y) {
-    	Path * temp;
+    	PathNode * temp;
         temp = c->next;
         free(c);
         openSet[s] = temp;
         openSetN[s]--;
+        if (openSetN[s] < 0) openSetN[s] = 0;
         return;
     }
     while (c->next != NULL) {
@@ -1196,7 +1211,8 @@ void remOpenSet(int x, int y, int s) {
     c->next = NULL;
     free(c);
     c = NULL;
-    openSetN[s]--;
+    if (openSetN[s] > 0) openSetN[s]--;
+
 }
 int getDist(int x, int y, int dx, int dy) {
 	if (!options[0]) {
@@ -1308,7 +1324,7 @@ void setCurrentF(int s) {
 		current[s].y = 0;
 		return;
 	}
-	Path * c = openSet[s];
+	PathNode * c = openSet[s];
 	while (c != NULL) {
 		if (fscore[s][c->x][c->y] != 1 && fscore[s][c->x][c->y] < smallest) {
 			smallest = fscore[s][c->x][c->y];
@@ -1539,7 +1555,7 @@ void showClosedSet(int s) {
 		hidScanInput();
 		keepConsole();
 		if (hidKeysDown() & KEY_SELECT) break;
-		Path *c = closedSet[s];
+		PathNode *c = closedSet[s];
 		while (c != NULL) {
 			if (i < 5) {
 				snprintf(mystring,sizeof(mystring),"f: %d",fscore[s][c->x][c->y]);
@@ -1572,8 +1588,8 @@ void showCameFrom(int s) {
 		hidTouchRead(&touch);
 
 		if (hidKeysDown() & KEY_SELECT) break;
-		px = (float)touch.px / 312.0f;
-		py = (float)touch.py / 235.0f;
+		px = (float)touch.px / 320.0f;
+		py = (float)touch.py / 240.0f;
 		px *= 400.0f;
 		py *= 240.0f;
 		dpx = (int)px;
@@ -1625,7 +1641,7 @@ void showCameFrom(int s) {
 }
 void getFarthestCurrent(int s) {
 	int ac = getBot(s);
-	Path *c = closedSet[s];
+	PathNode *c = closedSet[s];
 	int pdis = 0;
 	int pdanger = INT_MAX;
 	int myx = sprites[ac].x;
@@ -1776,7 +1792,7 @@ void showPathToApple(int s) {
 	plotting[s] = false;
 	totalPathN[s] = 0;
 	u64 timeUp = svcGetSystemTick();
-	while ((cameFrom[s][current[s].x][current[s].y].x || cameFrom[s][current[s].x][current[s].y].y) && totalPathN[s] < 240 * 400 && svcGetSystemTick() - timeUp < TICKS_PER_MS) {
+	while ((cameFrom[s][current[s].x][current[s].y].x || cameFrom[s][current[s].x][current[s].y].y) && totalPathN[s] < 1000 && svcGetSystemTick() - timeUp < TICKS_PER_MS) {
 		tempx = cameFrom[s][current[s].x][current[s].y].x;
 		tempy = cameFrom[s][current[s].x][current[s].y].y;
 		totalPath[s][totalPathN[s]].x = current[s].x;
@@ -1790,7 +1806,7 @@ void showPathToApple(int s) {
 		current[s].x = tempx;
 		current[s].y = tempy;
 	}
-	if (totalPathN[s] >= 240 * 400) {
+	if (totalPathN[s] >= 1000) {
 		/*snprintf(mystring,sizeof(mystring),"wtf.. %d",isGone);
 		myprintf(mystring);*/
 		totalPathN[s] = 0;
@@ -1934,7 +1950,9 @@ void fixCameFroms(int i) {
 void relocateApple() {
 	apple.x = ((rand() % (400 - 64)) + 30);
 	apple.y = ((rand() % (240 - 64)) + 30);
-	while (getColor(apple.x , apple.y ) || getColor((apple.x ) + 1, (apple.y ) + 1)) {
+	int i = 0;
+	while ((getColor(apple.x , apple.y ) || getColor(apple.x + 1, apple.y + 1)) && i < 40) {
+		i++;
 		apple.x = ((rand() % (400 - 64)) + 30);
 		apple.y = ((rand() % (240 - 64)) + 30);
 	}
@@ -1975,6 +1993,26 @@ void relocateApple() {
 		totalPathN[b] = 0;
 		plotting[b] = false;
 	}
+}
+void clearMyBuffer() {
+	memset(oldbuffer,0,sizeof(oldbuffer));
+	memset(mybuffer,0,sizeof(mybuffer));
+}
+void makePixel(int x, int y, u32 color) {
+	if (x > 400) x = 0;
+	else if(x < 0) x = 498;
+	if (y > 240) y = 0;
+	else if (y < 0) y = 239;
+	u32 offset = ((x * 240) - y + 239) * 3;
+	mybuffer[offset] = (u8)color;
+	mybuffer[offset + 1] = (u8)(color >> 8);
+	mybuffer[offset + 2] = (u8)(color >> 16);
+}
+void dirtyColor(int x, int y, u32 color) {
+	makePixel(x, onScreenY(y + 1),color); 
+	makePixel(onScreenX(x + 1),onScreenY(y + 1),color);
+	makePixel(onScreenX(x + 1),y,color);
+	makePixel(x,y,color);
 }
 void overwriteSprite( int x, int y, int width, int height, int image ) {
 //---------------------------------------------------------------------------------
@@ -2023,7 +2061,7 @@ void overwriteSprite( int x, int y, int width, int height, int image ) {
 
 	// Draw the glyph
 	C3D_DrawArrays(GPU_TRIANGLE_STRIP, arrayIndex, 4);
-
+	if (width == 2 && height == 2) dirtyColor(x, y, colors[image]);
 }
 //---------------------------------------------------------------------------------
 void drawSprite( int x, int y, int width, int height, int image ) {
@@ -2159,7 +2197,7 @@ void showPlotMovement(int s, bool refresh) {
 	int tempy;
 	totalPathN[s] = 0;
 	u64 timeUp = svcGetSystemTick();
-	while ((cameFrom[s][current[s].x][current[s].y].x || cameFrom[s][current[s].x][current[s].y].y) && totalPathN[s] < 240 * 400 && svcGetSystemTick() - timeUp < TICKS_PER_MS) {
+	while ((cameFrom[s][current[s].x][current[s].y].x || cameFrom[s][current[s].x][current[s].y].y) && totalPathN[s] < 1000 && svcGetSystemTick() - timeUp < TICKS_PER_MS) {
 		tempx = cameFrom[s][current[s].x][current[s].y].x;
 		tempy = cameFrom[s][current[s].x][current[s].y].y;
 		if (getNextColor(tempx,tempy) && tempx != sprites[ac].x  && tempy != sprites[ac].y )  {
@@ -2188,7 +2226,7 @@ void showPlotMovement(int s, bool refresh) {
 		current[s].x = tempx;
 		current[s].y = tempy;
 	}
-	if (totalPathN[s] >= 120 * 200 - 1) {
+	if (totalPathN[s] >= 1000) {
 		//bool isGone = (current[s].x == 0 && current[s].y == 0);
 		/*snprintf(mystring,sizeof(mystring),"wtf.. %d",isGone);
 		myprintf(mystring);*/
@@ -2516,7 +2554,7 @@ void eraseLine(int n) {
 		i++;
 		if (i >= 120 * 200) i = 0;
 	}
-	overwriteSprite(path[i][n].x , path[i][n].y , 2, 2, 9);
+	//overwriteSprite(path[i][n].x , path[i][n].y , 2, 2, 9); // don't erase the head - its dead!
 }
 static int lagMult() {
 	if (num_bikes <= 4) return 1;
@@ -2649,7 +2687,7 @@ static void setSprites() {
 		clearOpenSet(b);
 		clearClosedSet(b);
 		usedSpecial[b] = false;
-		giveUpTimer[b] = (u64)0;
+		giveUpTimer[b] = 0;
 	}
 	memset(path, 0, sizeof(path[0][0]) * 120 * 200 * 10);
 	apple.x = ((rand() % (400 - 64)) + 30);
@@ -2674,6 +2712,7 @@ static void setSprites() {
 		sprites[i].dead = false;
 		sprites[i].diag = 0;
 		sprites[i].forwards = true;
+		ignoreDeath[i] = true;
 
 
 		if (i > currentBots) memset(sprites[i].username,0,sizeof(sprites[i].username));
@@ -2700,6 +2739,7 @@ static void setSprites() {
 			if (sprites[i].x > 300 && sprites[i].dx) sprites[i].dx = abs(sprites[i].dx) * -1;
 		}
 	}
+	snprintf(sprites[7].username,sizeof(sprites[7].username),"Boundary");
 	if (options[7]) {
 		apple.x = 500;
 		apple.y = 500;
@@ -2910,7 +2950,7 @@ static void reversePath(int n) {
     pathPos[n] = tempPath;*/
     while (path[currentPath[n]][n].x == 0 && path[currentPath[n]][n].y == 0) {
     	currentPath[n]--;
-    	if (currentPath[n] < 0) currentPath[n] = 240 * 400 - 1;
+    	if (currentPath[n] < 0) currentPath[n] = 120 * 200 - 1;
     }
     int tempPath = currentPath[n];
     sprites[n].x = path[tempPath][n].x;
@@ -2978,16 +3018,24 @@ static void printScore() {
 			snprintf(mystring,sizeof(mystring),"\x1b[2;0HPress %s%s to forfeit.",RED,WHITE);
 			myprintf(mystring);
 			myprintf("\x1b[3;0H");
+		} else {
+			myprintf("\x1b[2;0H ");
+			myprintf("\x1b[3;0H ");
 		}
 	}
 	if (!options[5]) {
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[4;0HPress %s%s to teleport the apple once.",GREEN,WHITE);
 		myprintf(mystring);
+	} else {
+		myprintf("\x1b[4;0H");
 	}
 	if (options[6]) {
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[5;0HPress  to go in reverse."); myprintf(mystring);
+	} else {
+		myprintf("\x1b[5;0H");
 	}
 	if (everyoneElseIsDead(myNum)) { clearString(); snprintf(mystring,sizeof(mystring),"\x1b[6;0HGet %d more points!",theHighest() - score[myNum] + 1); myprintf(mystring); }
+	else myprintf("\x1b[6;0H");
 	int x = 8;
 	if (options[6]) x = 9;
 	for (int i = actual_bikes; i < numPlayers(); i++) {
@@ -4055,18 +4103,18 @@ static void moveSprites() {
 					showPlotMovement(bc, false);
 				}
 				if (totalPathN[bc] > 0) {
-					totalPathN[bc]--;
+					if (totalPathN[bc] > 0) totalPathN[bc]--;
 					while (totalPath[bc][totalPathN[bc]].x == 0 && totalPath[bc][totalPathN[bc]].y == 0 && totalPathN[bc] > 0) {
-						totalPathN[bc]--;
+						if (totalPathN[bc] > 0) totalPathN[bc]--;
 					}
 					if (totalPathN[bc] == 0) {
 						showPlotMovement(bc,false); 
-						totalPathN[bc]--;
+						if (totalPathN[bc] > 0) totalPathN[bc]--;
 					} 
 					int myx = totalPath[bc][totalPathN[bc]].x - sprites[i].x + bots[bc].fudge_x;
 					int myy = totalPath[bc][totalPathN[bc]].y - sprites[i].y + bots[bc].fudge_y;
 					if (myx == 0 && myy == 0) {
-						totalPathN[bc]--;
+						if (totalPathN[bc] > 0) totalPathN[bc]--;
 						myx = totalPath[bc][totalPathN[bc]].x - sprites[i].x + bots[bc].fudge_x;
 						myy = totalPath[bc][totalPathN[bc]].y - sprites[i].y + bots[bc].fudge_y;
 					}
@@ -4082,12 +4130,11 @@ static void moveSprites() {
 						if (abs(myx) != 2 && abs(myy) != 2) { 
 							//sprites[i].speed = 90;
 							if (abs(myx) >= 390) {
-								sprites[i].dy = 0;
-								if (sprites[i].x  <= 2) sprites[i].dx = bikeSpeed * -1;
-								else if (sprites[i].x  >= 398) sprites[i].dx = bikeSpeed;
+								if (sprites[i].x  <= 2) { sprites[i].dy = 0; sprites[i].dx = bikeSpeed * -1; }
+								else if (sprites[i].x  >= 398) { sprites[i].dy = 0; sprites[i].dx = bikeSpeed; }
 							} else if (abs(myy) >= 230) {
-								if (sprites[i].y  <= 2) sprites[i].dy = bikeSpeed * -1;
-								else if (sprites[i].y  >= 237) sprites[i].dy = bikeSpeed;
+								if (sprites[i].y  <= 2) { sprites[i].dy = 0; sprites[i].dy = bikeSpeed * -1; }
+								else if (sprites[i].y  >= 237) { sprites[i].dy = 0; sprites[i].dy = bikeSpeed; }
 							} else {
 								//snprintf(mystring,sizeof(mystring),"myx: %d myy: %d",myx,myy);
 								//myprintf(mystring);
@@ -4253,6 +4300,7 @@ static void moveSprites() {
 			}
 			sprites[i].x += sprites[i].dx;
 			sprites[i].y += sprites[i].dy;
+			ignoreDeath[i] = false;
 			
 			if (autoPilot) {
 				if (oldBotSpeed != sprites[myNum].speed || sprites[myNum].dy != oldydy || sprites[myNum].dx != oldxdx) {
@@ -4300,11 +4348,10 @@ static void moveSprites() {
 			if (currentPath[i] >= 200 * 120) currentPath[i] = 0;
 			path[currentPath[i]][i].x = sprites[i].x;
 			path[currentPath[i]][i].y = sprites[i].y;
-			overwriteSprite(sprites[i].x,sprites[i].y,2,2,i);
 			if (((i > 0 && i < currentBots) || i == myNum) && !sprites[i].dead) { //check my snake getting apple and collisions
-				u32 color1 = getColor(sprites[i].x , sprites[i].y );
+				u32 color1 = getColor(sprites[i].x , sprites[i].y);
 				u32 color2 = getColor(sprites[i].x + 1, sprites[i].y + 1);
-				if (abs(sprites[i].x - (apple.x )) <= 2 && abs(sprites[i].y - (apple.y )) <= 2) {
+				if (abs(sprites[i].x - apple.x) <= 2 && abs(sprites[i].y - apple.y) <= 2) {
 					if (svcGetSystemTick() - lastApple > TICKS_PER_MS * 15 * 6 * lagMult()) {
 						lastApple = svcGetSystemTick();
 						score[i]++;
@@ -4331,11 +4378,11 @@ static void moveSprites() {
 						if ((i < currentBots) || (i == myNum && autoPilot)) { plotting[bc] = false; totalPathN[bc] = 0; }
 						if (debugging) myprintf("Got apple.");
 						overwriteSprite(sprites[i].x,sprites[i].y,2,2,i);
-						//ignoreDeath = true;
+						ignoreDeath[i] = true;
 					}
 				}
 				else if (getLength(i) < 10) {} //don't die if game just started
-				else if ((color1 != colors[8] && color2 != colors[8]) && (color1 > 0 || color2 > 0) && !ignoreDeath) {
+				else if ((color1 != colors[8] && color2 != colors[8]) && (color1 > 0 || color2 > 0) && !ignoreDeath[i]) {
 					dead = color1;
 					dead2 = color2;
 					/*snprintf(mystring,sizeof(mystring),"dx: %d dy: %d",sprites[i].dx,sprites[i].dy);
@@ -4365,8 +4412,9 @@ static void moveSprites() {
 						}
 					}
 				}
-				else { overwriteSprite(sprites[i].x , sprites[i].y , 2, 2, i); ignoreDeath = false; }
+				else { overwriteSprite(sprites[i].x , sprites[i].y , 2, 2, i); }
 			}
+			if (!sprites[i].dead) overwriteSprite(sprites[i].x,sprites[i].y,2,2,i);
 		}
 	}
 }
@@ -4540,6 +4588,7 @@ void send_quit_finish() {
 }
 void start_screen_init()
 { 
+	qrcode = false;
 	keepConsole();
 	if (was_in_game) {
 		currentBots = numOpponents + 1;
@@ -5374,7 +5423,7 @@ void roundEnd_update() {
 	}
 
 	//leaving the game
-	if (kDown & KEY_START || kDown & KEY_B) { popScene(); if (myNum) pushScene(send_quit_init,send_quit_update,NULL,send_quit_finish); return; }
+	if (kDown & KEY_START || (kDown & KEY_B && svcGetSystemTick() - readyLock > TICKS_PER_SEC / 2)) { popScene(); if (myNum) pushScene(send_quit_init,send_quit_update,NULL,send_quit_finish); return; }
 
 	//someone left or joined
 	if(uds_enabled && udsWaitConnectionStatusEvent(false, false))
@@ -5444,6 +5493,7 @@ void game_init() {
 	C3D_RenderTargetSetOutput(target, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
 	gfxFlushBuffers();
 	gfxSwapBuffers();
+	clearMyBuffer();
 	for (int i = 0; i < 10; i++) oldscore[i] = 0;
 	oldbikes = num_bikes;
 	myconsoleClear();
@@ -5484,9 +5534,9 @@ void game_init() {
 	gfxFlushBuffers();
 	lastDead = 0;
 	totalSpace = 0;
-	ignoreDeath = true;
 	for (int i = 0; i < NUM_SPRITES; i++) {
 		erased[i] = false;
+		ignoreDeath[i] = true;
 	}
 	goDiag = false;
 	for (int b = 0; b < currentBots; b++) {
@@ -5841,6 +5891,9 @@ void game_update() {
 					if (everyoneElseIsDead(b) && !itsATie() && getHighestScore() == b) {
 						sprites[getBot(b)].dead = true;
 						lastDead = b;
+					} else if (everyoneElseIsDead(b) && options[7]) {
+						sprites[getBot(b)].dead = true;
+						lastDead = b;
 					}
 					else if (plotting[b]) {
 						continuePlotting(b);
@@ -5866,7 +5919,7 @@ void game_update() {
 				memset(replySprite,0,sizeof(replySprite[0]) * 10);
 				UDSSend(msg);
 				overwriteSprite(sprites[myNum].x , sprites[myNum].y , 2, 2, myNum);
-				ignoreDeath = true; //the frame buffer isn't updated from erasing the last piece of the tail...
+				ignoreDeath[0] = true; //the frame buffer isn't updated from erasing the last piece of the tail...
 			}
 			if (movingApple) {
 				bool oldUsed = usedSpecial[0];
@@ -6088,6 +6141,7 @@ void game_update() {
 			}
 		C3D_FrameEnd(0);
 		gfxFlushBuffers();
+		gfxSwapBuffers();
 		/*gfxFlushBuffers();
 		gfxSwapBuffers();*/
 	}
@@ -6423,9 +6477,8 @@ void start_screen_update() {
 			if (button != SWKBD_BUTTON_NONE && strlen(mybuf) > 0) { 
 				memset(overwriteName,0,sizeof(overwriteName));
 				snprintf(overwriteName,sizeof(overwriteName),"%s",mybuf);
-				clearString(); snprintf(mystring,sizeof(mystring),"Welcome, %s",overwriteName);
-				myprintf(mystring);
 				writeUsername();
+				start_screen_init();	// kind of hackish, but we want to redisplay the start screen.
 			} else {
 				memset(overwriteName,0,sizeof(overwriteName));
 				myprintf("Name set to default.");
@@ -6507,12 +6560,15 @@ int main(int argc, char **argv) {
 	srand(time(NULL));
 	// Initialize graphics
 	gfxInitDefault();
+	gfxSetDoubleBuffering(GFX_BOTTOM,0);
+	gfxSetDoubleBuffering(GFX_TOP,0);
 	C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
 
 	// Output at 100% on the first pair of left and right channels.
 
 
 	// Initialize the render target
+	clearMyBuffer();
 	target = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
 	C3D_RenderTargetSetClear(target, C3D_CLEAR_ALL, CLEAR_COLOR, 0);
 	C3D_RenderTargetSetOutput(target, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
