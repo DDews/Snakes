@@ -534,6 +534,10 @@ int getBot(int s) {
 	if (s >= currentBots) return currentBots - 1;
 	return s;
 }
+void myFrameBegin(int n) {
+	textVtxArrayPos = 0;
+	C3D_FrameBegin(n);
+}
 
 static void screen_get_string_size_internal(float* width, float* height, const char* text, float scaleX, float scaleY, bool oneLine, bool wrap, float wrapX) {
     float w = 0;
@@ -734,7 +738,6 @@ void keepXConsole() {
 	printy = 10.0;
 	float height;
 	float width;
-	textVtxArrayPos = 0;
 	char out[100];
 	char sub[100];
 	memset(out,0,sizeof(out));
@@ -803,7 +806,7 @@ void keepSConsole() {
 	keepXConsole();
 }
 void keepConsole() {
-	C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+	myFrameBegin(C3D_FRAME_SYNCDRAW);
 	C3D_FrameDrawOn(target2);
 	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &textprojection);
 	keepXConsole();
@@ -1394,7 +1397,7 @@ int getMoveableRange(int s) {
 		//keepConsole();
 		i++;
 		setCurrentF(s);
-		/*C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+		/*myFrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target);
 			C3D_TexBind(0, &spritesheet_tex);
 			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
@@ -1496,7 +1499,7 @@ void getMoveableRangeApple(int s) {
 		i++;
 		setCurrentF(s);
 
-		/*C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+		/*myFrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target);
 			C3D_TexBind(0, &spritesheet_tex);
 			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
@@ -1599,7 +1602,7 @@ void showCameFrom(int s) {
 			writeColor(totalPath[s][m].x,totalPath[s][m].y,colors[8]);
 		}
 		if (px && py) {
-			C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+			myFrameBegin(C3D_FRAME_SYNCDRAW);
 				C3D_FrameDrawOn(target);
 				C3D_TexBind(0, &spritesheet_tex);
 				C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
@@ -1731,7 +1734,7 @@ bool pathfindToApple(int s) {
 		i++;
 		setCurrentF(s);
 
-		/*C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+		/*myFrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target);
 			C3D_TexBind(0, &spritesheet_tex);
 			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
@@ -1818,7 +1821,7 @@ void showPathToApple(int s) {
 		keepConsole();
 		hidScanInput();
 		if (hidKeysDown() & KEY_A) break;
-		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+		myFrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target);
 			C3D_TexBind(0, &spritesheet_tex);
 			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
@@ -2181,7 +2184,7 @@ void useSpecialOrGiveUp(int s) {
 }
 
 void showPlotMovement(int s, bool refresh) {
-	if (refresh && patchConsole) keepConsole();
+	//if (refresh && patchConsole) keepConsole();
 	if (sprites[getBot(s)].dead) return;
 	if (openSetN[s] == 0) {
 		useSpecialOrGiveUp(s);
@@ -2214,7 +2217,7 @@ void showPlotMovement(int s, bool refresh) {
 		if (debugging) {
 			keepConsole();
 
-			C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+			myFrameBegin(C3D_FRAME_SYNCDRAW);
 				C3D_FrameDrawOn(target);
 				C3D_TexBind(0, &spritesheet_tex);
 				C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
@@ -2546,7 +2549,7 @@ void eraseLine(int n) {
 			C3D_FrameEnd(0);
 			gfxFlushBuffers();
 			gfxSwapBuffers();
-			C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+			myFrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target);
 			C3D_TexBind(0, &spritesheet_tex);
 			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
@@ -4644,7 +4647,7 @@ void start_screen_init()
 	importUsername();
 }
 void start_screen_draw() {
-	C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+	myFrameBegin(C3D_FRAME_SYNCDRAW);
 		C3D_FrameDrawOn(target);
 		if (qrcode) C3D_TexBind(0, &qrcode_tex);
 		else C3D_TexBind(0, &spritesheet_tex);
@@ -5075,7 +5078,7 @@ void roundEnd_init() {
 	iWin = false;
 }
 void roundEnd_update() {
-	C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+	myFrameBegin(C3D_FRAME_SYNCDRAW);
 	C3D_FrameDrawOn(target2);
 	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &textprojection);
 	myprintf("\x1b[2;0H "); //clear the 3rd line in case we scroll text
@@ -5522,7 +5525,7 @@ void game_init() {
 	oldCPos.dx = 0;
 	oldCPos.dy = 0;
 	nextMove = 0;
-	C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+	myFrameBegin(C3D_FRAME_SYNCDRAW);
 		C3D_FrameDrawOn(target);
 		C3D_TexBind(0, &spritesheet_tex);
 		C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
@@ -5905,7 +5908,7 @@ void game_update() {
 				}
 			}
 		}
-		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+		myFrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_FrameDrawOn(target);
 			C3D_TexBind(0, &spritesheet_tex);
 			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &projection);
@@ -6139,13 +6142,17 @@ void game_update() {
 				oldApplex = apple.x;
 				oldAppley = apple.y;
 			}
+			C3D_FrameDrawOn(target2);
+			C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, uLoc_projection, &textprojection);
+			texEnvMode = MODE_TEXT;
+			keepSConsole();
 		C3D_FrameEnd(0);
 		gfxFlushBuffers();
 		gfxSwapBuffers();
 		/*gfxFlushBuffers();
 		gfxSwapBuffers();*/
 	}
-	keepConsole();
+	//keepConsole();
 	if (everyoneElseIsDead(myNum)) {
 		//no apple mode
 		if (options[7] && !sprites[myNum].dead) {
