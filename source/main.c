@@ -538,6 +538,17 @@ void myFrameBegin(int n) {
 	textVtxArrayPos = 0;
 	C3D_FrameBegin(n);
 }
+bool noSuchNode(int node) {
+	for (int i = 0; i < actual_bikes; i++) {
+		if (sprites[i].node == node) return true;
+	}
+	return false;
+}
+void cleanNodes() {
+	for (int i = num_bikes; i < NUM_SPRITES; i++) {
+		sprites[i].node = 0;
+	}
+}
 
 static void screen_get_string_size_internal(float* width, float* height, const char* text, float scaleX, float scaleY, bool oneLine, bool wrap, float wrapX) {
     float w = 0;
@@ -3041,7 +3052,7 @@ static void printScore() {
 	else myprintf("\x1b[6;0H");
 	int x = 8;
 	if (options[6]) x = 9;
-	for (int i = actual_bikes; i < numPlayers(); i++) {
+	for (int i = actual_bikes; i < num_bikes; i++) {
 		clearString(); snprintf(mystring,sizeof(mystring),"\x1b[%d;0H%s%s%s has joined the game.",x + i - actual_bikes,textColors[i],sprites[i].username,WHITE);
 		myprintf(mystring);
 	}
@@ -4591,6 +4602,9 @@ void send_quit_finish() {
 }
 void start_screen_init()
 { 
+	for (int i = 1; i < NUM_SPRITES; i++) {
+		sprites[i].node = 0;
+	}
 	qrcode = false;
 	keepConsole();
 	if (was_in_game) {
@@ -4849,6 +4863,7 @@ void player_crashed_update() {
 				}
 			}
 			num_bikes = constatus.total_nodes;
+			cleanNodes();
 			memset(replyChange,1,sizeof(replyChange[0]) * 10);
 			memset(replySprite,1,sizeof(replySprite[0]) * 10);
 			quit = -1;
@@ -4860,6 +4875,7 @@ void player_crashed_update() {
 }
 void player_crashed_finish() {
 	num_bikes = constatus.total_nodes;
+	cleanNodes();
 	memset(replyScore,0,sizeof(replyScore[0]) * 10);
 	memset(replyChange,1,sizeof(replyChange[0]) * 10);
 }
@@ -4963,6 +4979,7 @@ void receive_bike_update() {
 				currentBots = 1;
 				myNum = constatus.cur_NetworkNodeID - 1;
 				num_bikes = constatus.total_nodes;
+				cleanNodes();
 				sprites[myNum].image = myNum;
 				sprites[myNum].node = myNode;
 				memset(sprites[myNum].username,0,sizeof(sprites[myNum].username));
@@ -5440,6 +5457,7 @@ void roundEnd_update() {
 		ret = udsGetNodeInformation(constatus.total_nodes,&tmpnode);
 		if (constatus.total_nodes >= num_bikes) {
 			num_bikes = constatus.total_nodes;
+			cleanNodes();
 			memset(sprites[num_bikes].username,0,sizeof(sprites[num_bikes - 1].username));
 			udsGetNodeInfoUsername(&tmpnode,sprites[num_bikes - 1].username);
 			msg.sprite = sprites[num_bikes - 1];
@@ -5481,6 +5499,7 @@ void roundEnd_update() {
 			}
 			if (foundNum == -1) myNum = constatus.total_nodes - 1;*/
 			num_bikes = constatus.total_nodes;
+			cleanNodes();
 			memset(replyScore,0,sizeof(replyScore[0]) * 10);
 			memset(replyChange,1,sizeof(replyChange[0]) * 10);
 		}
@@ -6001,6 +6020,10 @@ void game_update() {
 						oldbikes = 0;
 						UDSSend(msg);
 					}
+					if (noSuchNode(msg.sprite.node)) {
+						sprites[num_bikes] = msg.sprite;
+						num_bikes++;
+					}
 				}
 				else if (msg.sprite.speed == 5050) {} //ignore
 				else if (msg.sprite.speed == 123) {} //ignore
@@ -6043,6 +6066,7 @@ void game_update() {
 				else {
 					if (msg.sprite.image > num_bikes) { //someone has joined and we missed it...
 						num_bikes = msg.sprite.image + 1; 
+						cleanNodes();
 						for (int i = actual_bikes; i < NUM_SPRITES; i++) { 
 							sprites[i].dead = true; 
 						} 
@@ -6217,7 +6241,7 @@ void prepare_room_update() {
 			}
 			num_bikes = constatus.total_nodes;
 			if (num_bikes == 1) currentBots = numOpponents;
-
+			cleanNodes();
 		}
 	}
 	if (uds_enabled) ret = udsPullPacket(&bindctx, tmpbuf, tmpbuf_size, &actual_size, &src_NetworkNodeID);
@@ -6540,6 +6564,7 @@ void wait_for_player_update() {
 			clearString(); snprintf(mystring,sizeof(mystring),"%s%s has joined as %s%s",textColors[num_bikes],sprites[num_bikes].username,colorNames[num_bikes],WHITE);
 			myprintf(mystring);
 			num_bikes = constatus.total_nodes;
+			cleanNodes();
 		}
 		popScene();
 		return;
@@ -6653,6 +6678,7 @@ int main(int argc, char **argv) {
 				myNum = 0;
 				currentBots = numOpponents + 1;
 				num_bikes = 1;
+				cleanNodes();
 				was_in_game = false;
 				network = NULL;
 				networks = NULL;
