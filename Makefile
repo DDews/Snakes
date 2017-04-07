@@ -35,7 +35,7 @@ INCLUDES	:=	include
 #ROMFS		:=	romfs
 
 APP_TITLE       := Snakes
-APP_DESCRIPTION := v0.2.5
+APP_DESCRIPTION := v0.2.5.2
 APP_AUTHOR      := Desynched
 
 ICON            := meta/icon.png
